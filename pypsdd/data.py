@@ -4,6 +4,11 @@ from collections import defaultdict
 
 # AC: TODO: empty Inst?  Inst.from_list([],var_count)? 
 
+
+# TODO: needed?
+def cmp(a, b):
+    return (a > b) - (a < b)
+
 class DataSet:
     """Dataset.  Implements a Dict from object to count in dataset"""
 
@@ -32,11 +37,12 @@ class DataSet:
         del self.data[key]
 
     def __iter__(self):
-        return self.data.iteritems()
+        return self.data.items()
 
     def __repr__(self,limit=10):
+        # TODO: isn't this just a reverse sorted list? I think that is natively supported
         cmpf = lambda x,y:-cmp(x[1],y[1])
-        items = sorted(self.data.items(),cmp=cmpf)
+        items = sorted(self.data.items(), key=cmpf)
         fmt = " %%%dd %%s" % len(str(items[0][1]))
         st = [ fmt % (count,inst) for inst,count in items[:limit] ]
         if len(items) > limit: st.append(" ...")

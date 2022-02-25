@@ -17,3 +17,5 @@ For a faster and well tested and documented implementation of the algorithms in 
 - The folder `./data` includes the datasets used for the experiments.
 
 - The folder `./exp` includes results such as the learned circuits, and raw results from "missing data experiments".
+
+Python 3.6.9 was used to run the experiments.
