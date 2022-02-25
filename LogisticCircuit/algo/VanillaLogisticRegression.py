@@ -6,11 +6,11 @@ from time import perf_counter
 
 import numpy as np
 
-from algo.LogisticRegression import LogisticRegression
-from structure.AndGate import AndGate
-from structure.CircuitNode import CircuitNode, OrGate, CircuitTerminal
-from structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE, LITERAL_IS_TAUTOLOGY
-from structure.Vtree import Vtree
+from .LogisticRegression import LogisticRegression
+from ..structure.AndGate import AndGate
+from ..structure.CircuitNode import CircuitNode, OrGate, CircuitTerminal
+from ..structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE, LITERAL_IS_TAUTOLOGY
+from ..structure.Vtree import Vtree
 
 FORMAT = """c variables (from inputs) start from 1
 c ids of logistic circuit nodes start from 0

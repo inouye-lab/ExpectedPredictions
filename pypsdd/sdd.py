@@ -1,5 +1,5 @@
 import heapq
-from data import InstMap
+from .data import InstMap
 
 class SddNode:
     """Sentential Decision Diagram (SDD)"""

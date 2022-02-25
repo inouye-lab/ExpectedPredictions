@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-from util.DataSet import DataSet, DataSets
+from .DataSet import DataSet, DataSets
 
 
 def _read32(bytestream):

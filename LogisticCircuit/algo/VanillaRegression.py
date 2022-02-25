@@ -9,10 +9,10 @@ from sklearn.metrics import mean_squared_error
 
 # from algo.Ridge import Ridge
 from sklearn.linear_model import Ridge
-from structure.AndGate import AndGate
-from structure.CircuitNode import CircuitNode, OrGate, CircuitTerminal
-from structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE, LITERAL_IS_TAUTOLOGY
-from structure.Vtree import Vtree
+from ..structure.AndGate import AndGate
+from ..structure.CircuitNode import CircuitNode, OrGate, CircuitTerminal
+from ..structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE, LITERAL_IS_TAUTOLOGY
+from ..structure.Vtree import Vtree
 
 FORMAT = """c variables (from inputs) start from 1
 c ids of logistic circuit nodes start from 0

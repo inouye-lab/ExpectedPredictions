@@ -1,4 +1,4 @@
-from structure.CircuitNode import CircuitNode
+from .CircuitNode import CircuitNode
 
 
 class AndGate(CircuitNode):

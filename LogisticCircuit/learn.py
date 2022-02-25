@@ -1,9 +1,9 @@
 import argparse
 import time
 
-from algo.LogisticCircuit import LogisticCircuit
-from structure.Vtree import Vtree
-from util.mnist_data import read_data_sets
+from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
+from LogisticCircuit.structure.Vtree import Vtree
+from LogisticCircuit.util.mnist_data import read_data_sets
 
 FLAGS = None
 

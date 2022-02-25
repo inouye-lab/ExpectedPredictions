@@ -10,13 +10,15 @@ import itertools
 import argparse
 import json
 import copy
+
+from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
+from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
+from LogisticCircuit.util.DataSet import DataSet
+
 sys.path.append("LogisticCircuit")
 sys.path.append("pypsdd")
 sys.path.append(".")
 
-from structure.Vtree import Vtree as LC_Vtree
-from algo.LogisticCircuit import LogisticCircuit
-from LogisticCircuit.util.DataSet import DataSet
 
 DATASET = 'mnist'
 DATASET_PATH = f'data/{DATASET}/{DATASET}.pklz'

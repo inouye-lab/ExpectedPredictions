@@ -1,7 +1,4 @@
 import sys
-sys.path.append("LogisticCircuit")
-sys.path.append("pypsdd")
-sys.path.append('.')
 
 import argparse
 

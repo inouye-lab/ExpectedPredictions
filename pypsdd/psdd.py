@@ -2,9 +2,9 @@ import math
 import random
 import heapq
 
-from sdd import SddNode,NormalizedSddNode
-from data import DataSet,Inst,InstMap,WeightedInstMap
-from sdd import SddEnumerator,SddTerminalEnumerator
+from .sdd import SddNode, NormalizedSddNode
+from .data import DataSet, Inst, InstMap, WeightedInstMap
+from .sdd import SddEnumerator, SddTerminalEnumerator
 from prior import Prior
 
 class PSddNode(NormalizedSddNode):

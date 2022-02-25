@@ -1,5 +1,5 @@
-from sdd import SddNode
-from psdd import PSddNode
+from .sdd import SddNode
+from .psdd import PSddNode
 import math
 
 # AC: TODO: check vtree scope
