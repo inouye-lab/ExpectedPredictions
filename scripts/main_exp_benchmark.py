@@ -97,7 +97,7 @@ if __name__ == '__main__':
     print("Loading PSDD..")
     psdd_vtree = PSDD_Vtree.read(VTREE_FILE)
     manager = PSddManager(psdd_vtree)
-    psdd = psdd_io.psdd_yitao_read(PSDD_FILE, manager)
+    psdd = pypsdd.psdd_io.psdd_yitao_read(PSDD_FILE, manager)
     #################
 
     try:

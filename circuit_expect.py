@@ -3,20 +3,20 @@ import sys
 sys.path.append("LogisticCircuit")
 sys.path.append("pypsdd")
 
-from data import Inst
+from pypsdd.data import Inst
 
 import numpy as np
 from scipy.special import comb
 
-from algo.LogisticCircuit import LogisticCircuit
-from structure.CircuitNode import CircuitNode as LogisticCircuitNode
-from structure.AndGate import AndGate as LogisticAndGate
-from structure.CircuitNode import OrGate as LogisticOrGate
-from structure.CircuitNode import CircuitTerminal as LogisticCircuitTerminal
+from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
+from LogisticCircuit.structure.CircuitNode import CircuitNode as LogisticCircuitNode
+from LogisticCircuit.structure.AndGate import AndGate as LogisticAndGate
+from LogisticCircuit.structure.CircuitNode import OrGate as LogisticOrGate
+from LogisticCircuit.structure.CircuitNode import CircuitTerminal as LogisticCircuitTerminal
 
-from structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE
+from LogisticCircuit.structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE
 
-from psdd import PSddNode
+from pypsdd.psdd import PSddNode
 from EVCache import EVCache
 
 import pdb
