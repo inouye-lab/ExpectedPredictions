@@ -2,15 +2,11 @@ import matplotlib
 matplotlib.use('Agg')
 
 import sys
-sys.path.append("LogisticCircuit")
-sys.path.append("pypsdd")
-sys.path.append('..')
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import BernoulliNB
 
 import argparse
-import pickle
 
 try:
     from time import perf_counter
@@ -35,23 +31,20 @@ from LogisticCircuit.algo.LogisticCircuit import learn_logistic_circuit
 from LogisticCircuit.util.DataSet import DataSet
 from LogisticCircuit.algo.RegressionCircuit import learn_regression_circuit, RegressionCircuit
 
-import psdd_io
-from manager import PSddManager
-from algo.LogisticCircuit import LogisticCircuit
-from structure.Vtree import Vtree as LC_Vtree
-from vtree import Vtree as PSDD_Vtree
+import pypsdd.psdd_io as psdd_io
+from pypsdd.manager import PSddManager
+from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
+from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
+from pypsdd.vtree import Vtree as PSDD_Vtree
 
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import f1_score, accuracy_score
-
 
 def dump_data_csv(X, data_path):
     with open(data_path, 'w') as f:
         for x in X:
             f.write('{}\n'.format(','.join(str(s) for s in x)))
 
-
-from sklearn.metrics import f1_score, accuracy_score
 
 f1_score_micro = functools.partial(f1_score, average='micro')
 f1_score_macro = functools.partial(f1_score, average='macro')

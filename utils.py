@@ -1,19 +1,19 @@
-import sys
+# import sys
+# sys.path.append("LogisticCircuit")
+# sys.path.append("pypsdd")
 import numpy as np
-sys.path.append("LogisticCircuit")
-sys.path.append("pypsdd")
-from structure.Vtree import Vtree as LC_Vtree
+from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
 
 import pdb
 
-from vtree import Vtree as PSDD_Vtree
-from manager import PSddManager
-import psdd_io
-from data import Inst
+from pypsdd.vtree import Vtree as PSDD_Vtree
+from pypsdd.manager import PSddManager
+import pypsdd.psdd_io as psdd_io
+from pypsdd.data import Inst
 
 
 import itertools
-from algo.LogisticCircuit import LogisticCircuit
+from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
 
 import circuit_expect
 from sympy import *

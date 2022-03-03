@@ -1,7 +1,7 @@
 import sys
-sys.path.append("LogisticCircuit")
-sys.path.append("pypsdd")
-sys.path.append('..')
+# sys.path.append("LogisticCircuit")
+# sys.path.append("pypsdd")
+# sys.path.append('..')
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import BernoulliNB
@@ -32,11 +32,11 @@ from LogisticCircuit.algo.LogisticCircuit import learn_logistic_circuit
 from LogisticCircuit.util.DataSet import DataSet
 from LogisticCircuit.algo.RegressionCircuit import learn_regression_circuit, RegressionCircuit
 
-import psdd_io
-from manager import PSddManager
-from algo.LogisticCircuit import LogisticCircuit
-from structure.Vtree import Vtree as LC_Vtree
-from vtree import Vtree as PSDD_Vtree
+import pypsdd.psdd_io as psdd_io
+from pypsdd.manager import PSddManager
+from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
+from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
+from pypsdd.vtree import Vtree as PSDD_Vtree
 
 from sklearn.metrics import mean_squared_error
 
