@@ -1,5 +1,8 @@
-from collections import deque, defaultdict
+from collections import deque
 from abc import ABC, abstractmethod
+from typing import Optional, Set, Deque, List, TextIO, Union, Tuple
+import numpy as np
+from numpy.random import RandomState
 
 VTREE_FORMAT = """c ids of vtree nodes start at 0
 c ids of variables start at 1
@@ -14,25 +17,44 @@ c
 
 
 class Vtree(ABC):
+    _index: int
+    _var_count: int
 
-    def __init__(self, index):
+    def __init__(self, index: int):
         self._index = index
 
     @property
-    def index(self):
+    def index(self) -> int:
         return self._index
 
     @property
-    def var_count(self):
+    def var_count(self) -> int:
         return self._var_count
 
     @abstractmethod
-    def is_leaf(self):
+    def is_leaf(self) -> bool:
         pass
 
-    def bfs(self):
-        visited = []
-        nodes_to_visit = deque()
+    @property
+    def left(self) -> Optional['Vtree']:
+        return None
+
+    @property
+    def right(self) -> Optional['Vtree']:
+        return None
+
+    @property
+    def var(self) -> int:
+        return 0
+
+    @property
+    @abstractmethod
+    def variables(self) -> Set[int]:
+        pass
+
+    def bfs(self) -> List['Vtree']:
+        visited: List['Vtree'] = []
+        nodes_to_visit: Deque['Vtree'] = deque()
         nodes_to_visit.append(self)
         while nodes_to_visit:
             n = nodes_to_visit.popleft()
@@ -44,35 +66,37 @@ class Vtree(ABC):
         return visited
 
     @staticmethod
-    def read(file):
+    def read(file) -> 'Vtree':
         with open(file, 'r') as vtree_file:
+            vtree_file: TextIO
             line = 'c'
             while line[0] == 'c':
                 line = vtree_file.readline()
             if line.strip().split(' ')[0] != 'vtree':
                 raise ValueError('Number of vtree nodes is not specified')
             num_nodes = int(line.strip().split(' ')[1])
-            nodes = [None] * num_nodes
-            root = None
+            nodes: List[Optional[Vtree]] = [None] * num_nodes
+            root: Optional[Vtree] = None
             for line in vtree_file.readlines():
-                line_as_list = line.strip().split(' ')
+                line_as_list: List[str] = line.strip().split(' ')
+                index = int(line_as_list[1])
                 if line_as_list[0] == 'L':
-                    root = VtreeLeaf(int(line_as_list[1]), int(line_as_list[2]))
-                    nodes[int(line_as_list[1])] = root
+                    root = VtreeLeaf(index, int(line_as_list[2]))
                 elif line_as_list[0] == 'I':
-                    root = VtreeIntermediate(int(line_as_list[1]),
-                                             nodes[int(line_as_list[2])], nodes[int(line_as_list[3])])
-                    nodes[int(line_as_list[1])] = root
+                    root = VtreeIntermediate(index, nodes[int(line_as_list[2])], nodes[int(line_as_list[3])])
                 else:
                     raise ValueError('Vtree node could only be L or I')
+                nodes[index] = root
+            if root is None:
+                raise ValueError('Vtree has no elements')
             return root
 
     def save(self, file):
-
-        leaves_before_parents = list(reversed(self.bfs()))
-        n_nodes = len(leaves_before_parents)
+        leaves_before_parents: List[Vtree] = list(reversed(self.bfs()))
+        n_nodes: int = len(leaves_before_parents)
         print('There are ', n_nodes)
         with open(file, 'w') as f_out:
+            f_out: TextIO
             f_out.write(VTREE_FORMAT)
             f_out.write(f'vtree {n_nodes}\n')
 
@@ -86,25 +110,29 @@ class Vtree(ABC):
 
 
 class VtreeLeaf(Vtree):
+    _var: int
 
-    def __init__(self, index, variable):
+    def __init__(self, index: int, variable: int):
         super(VtreeLeaf, self).__init__(index)
         self._var = variable
         self._var_count = 1
 
-    def is_leaf(self):
+    def is_leaf(self) -> bool:
         return True
 
     @property
-    def var(self):
+    def var(self) -> int:
         return self._var
 
     @property
-    def variables(self):
-        return set([self._var])
+    def variables(self) -> Set[int]:
+        return {self._var}
 
 
 class VtreeIntermediate(Vtree):
+    _left: Vtree
+    _right: Vtree
+    _variables: Set[int]
 
     def __init__(self, index, left, right):
         super(VtreeIntermediate, self).__init__(index)
@@ -115,35 +143,29 @@ class VtreeIntermediate(Vtree):
         self._variables.update(self._left.variables)
         self._variables.update(self._right.variables)
 
-    def is_leaf(self):
+    def is_leaf(self) -> bool:
         return False
 
     @property
-    def left(self):
+    def left(self) -> Vtree:
         return self._left
 
     @property
-    def right(self):
+    def right(self) -> Vtree:
         return self._right
 
     @property
-    def variables(self):
+    def variables(self) -> Set[int]:
         return self._variables
-
-    @property
-    def var(self):
-        return 0
 
 
 #
 # Generate vtrees
 #
-import numpy as np
 RAND_SEED = 1337
 
 
-def balanced_random_split(variables, index, rand_gen):
-
+def balanced_random_split(variables: np.ndarray, index: int, rand_gen: RandomState) -> Tuple[Vtree, int]:
     n_vars = len(variables)
 
     if n_vars > 1:
@@ -157,13 +179,12 @@ def balanced_random_split(variables, index, rand_gen):
         v = VtreeIntermediate(id_right, node_left, node_right)
         return v, id_right + 1
     else:
-
         v = VtreeLeaf(index, variables[0])
         return v, index + 1
 
 
-def unbalanced_random_split(variables, index, rand_gen, beta_prior=(0.3, 0.3)):
-
+def unbalanced_random_split(variables: np.ndarray, index: int, rand_gen: RandomState,
+                            beta_prior: Tuple[float, float] = (0.3, 0.3)) -> Tuple[Vtree, int]:
     n_vars = len(variables)
 
     if n_vars > 1:
@@ -179,21 +200,20 @@ def unbalanced_random_split(variables, index, rand_gen, beta_prior=(0.3, 0.3)):
         v = VtreeIntermediate(id_right, node_left, node_right)
         return v, id_right + 1
     else:
-
         v = VtreeLeaf(index, variables[0])
         return v, index + 1
 
 
-def generate_random_vtree(n_vars, rand_gen=None, balanced=True, beta_prior=(0.3, 0.3)):
+def generate_random_vtree(n_vars: int, rand_gen: Union[RandomState, None] = None, balanced: bool = True,
+                          beta_prior: Tuple[float, float] = (0.3, 0.3)) -> Vtree:
 
     if rand_gen is None:
         rand_gen = np.random.RandomState(RAND_SEED)
 
-    vars = np.arange(n_vars) + 1
-
+    variables: np.ndarray = np.arange(n_vars) + 1
     if balanced:
-        v, _ = balanced_random_split(vars, index=0, rand_gen=rand_gen)
+        v, _ = balanced_random_split(variables, index=0, rand_gen=rand_gen)
     else:
-        v, _ = unbalanced_random_split(vars, index=0, rand_gen=rand_gen, beta_prior=beta_prior)
+        v, _ = unbalanced_random_split(variables, index=0, rand_gen=rand_gen, beta_prior=beta_prior)
 
     return v

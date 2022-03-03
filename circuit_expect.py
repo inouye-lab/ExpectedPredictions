@@ -1,31 +1,23 @@
 # Taking Expectation of a Logistic Circuit (without the logsitic) over a PSDD
-import sys 
-sys.path.append("LogisticCircuit")
-sys.path.append("pypsdd")
+# import sys
+# sys.path.append("LogisticCircuit")
+# sys.path.append("pypsdd")
+from typing import NoReturn, Union
 
+from pypsdd import SddNode
 from pypsdd.data import Inst
 
 import numpy as np
 from scipy.special import comb
 
 from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
-from LogisticCircuit.structure.CircuitNode import CircuitNode as LogisticCircuitNode
-from LogisticCircuit.structure.AndGate import AndGate as LogisticAndGate
-from LogisticCircuit.structure.CircuitNode import OrGate as LogisticOrGate
-from LogisticCircuit.structure.CircuitNode import CircuitTerminal as LogisticCircuitTerminal
+from LogisticCircuit.structure.AndGate import AndGate as LogisticAndGate, AndChildNode as LogisticAndChild
+from LogisticCircuit.structure.CircuitNode import OrGate as LogisticOrGate, CircuitTerminal as LogisticCircuitTerminal
 
 from LogisticCircuit.structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE
 
 from pypsdd.psdd import PSddNode
-from EVCache import EVCache
-
-import pdb
-
-def psdd_index(psdd):
-    return psdd # TODO
-
-def lgc_index(lgc):
-    return lgc
+from EVCache import EVCache, psdd_index, lgc_index
 
 N_comb = 31
 COMB = np.zeros((N_comb, N_comb), dtype='float')
@@ -33,12 +25,13 @@ for i in range(N_comb):
     for j in range(N_comb):
         COMB[i][j] = comb(i, j, exact=False)
 
-def choose(n , m):
+
+def choose(n, m):
     return COMB[n][m]
     # return np.float64(1.0) * comb(n, m, exact=True)
 
 
-def Expectation(psdd, lgc, cache, obsX = None):
+def Expectation(psdd: PSddNode, lgc: LogisticCircuit, cache: EVCache, obsX: np.ndarray = None) -> np.ndarray:
     """
     Main function to call
 
@@ -50,11 +43,12 @@ def Expectation(psdd, lgc, cache, obsX = None):
         obsX = -1 * np.ones(lgc._num_variables)
         p_observed = np.float64(1.0)
     else:
-        p_observed = np.ones( (obsX.shape[0], 1), dtype='float')
+        p_observed = np.ones((obsX.shape[0], 1), dtype='float')
         for i in range(obsX.shape[0]):
             inp = Inst.from_list(obsX[i], lgc._num_variables, zero_indexed=True)
-            p_observed[i,:] = psdd.probability(inp)
+            p_observed[i, :] = psdd.probability(inp)
 
+    # TODO: And gate root does not seem to be possible
     if isinstance(lgc._root, LogisticAndGate):
         value = exp_g_AND(psdd, lgc._root, cache, obsX)
     elif isinstance(lgc._root, LogisticOrGate):
@@ -66,32 +60,33 @@ def Expectation(psdd, lgc, cache, obsX = None):
     value += np.float64(lgc._bias)
     return np.copy(value)
 
-def exp_g_AND(psdd, lgc: LogisticCircuitNode, cache: EVCache, obsX):
+
+def exp_g_AND(psdd: PSddNode, lgc: LogisticAndGate, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     prime, sub = psdd
-    if not isinstance(prime, PSddNode) or not isinstance(sub,PSddNode):
+    if not isinstance(prime, PSddNode) or not isinstance(sub, PSddNode):
         raise Exception("Psdd: Children of And gates should be Or gates")
 
     if not isinstance(lgc, LogisticAndGate):
         raise Exception("Lgc: Wrong Node type, should be AND")
     
-    cached_value = cache.get_g( psdd_index(psdd), lgc_index(lgc))
+    cached_value = cache.get_g(psdd_index(psdd), lgc_index(lgc))
     if cached_value is not None:
         return cached_value
 
-    value = exp_g_OR(prime, lgc.prime, cache, obsX) + exp_g_OR(sub, lgc.sub, cache, obsX)    
+    value = exp_g_OR(prime, lgc.prime, cache, obsX) + exp_g_OR(sub, lgc.sub, cache, obsX)
     cache.put_g(psdd_index(psdd), lgc_index(lgc), value)
     return np.copy(value)
 
 
-def exp_fg_AND(psdd, lgc: LogisticCircuitNode, cache: EVCache, obsX):
+def exp_fg_AND(psdd: PSddNode, lgc: LogisticAndGate, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     #pdb.set_trace()
     prime, sub = psdd
-    cached_value = cache.get_fg( psdd_index(psdd), lgc_index(lgc))
+    cached_value = cache.get_fg(psdd_index(psdd), lgc_index(lgc))
     if cached_value is not None:
         return cached_value
 
     value = np.float64(0.0)
-    if isinstance(lgc, LogisticCircuitTerminal):
+    if isinstance(lgc, LogisticCircuitTerminal):  # TODO: don't think it can happen with good type checks
         raise("should not happen, and in logistic circuit being terminal")
     elif isinstance(lgc.prime, LogisticCircuitTerminal) and isinstance(lgc.sub, LogisticCircuitTerminal): 
         value = lgc.prime.parameter.reshape(1, -1) * exp_f_OR(sub, lgc.sub, cache, obsX) * exp_f_OR(prime, lgc.prime, cache, obsX) \
@@ -108,16 +103,17 @@ def exp_fg_AND(psdd, lgc: LogisticCircuitNode, cache: EVCache, obsX):
         value = exp_f_OR(prime, lgc.prime, cache, obsX) * exp_g_OR(sub, lgc.sub, cache, obsX) \
             + exp_f_OR(sub, lgc.sub, cache, obsX) * exp_g_OR(prime, lgc.prime, cache, obsX)
 
-    cache.put_fg( psdd_index(psdd), lgc_index(lgc), value )
+    cache.put_fg(psdd_index(psdd), lgc_index(lgc), value)
     return np.copy(value)
 
-def exp_f_AND(psdd, lgc: LogisticCircuitNode, cache: EVCache, obsX):
+
+def exp_f_AND(psdd: PSddNode, lgc: LogisticAndGate, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     value = np.float64(0.0)
     if isinstance(lgc, LogisticCircuitTerminal):
         raise Exception("this might not happen at all")
     else:
         prime, sub = psdd
-        cached_value = cache.get_f( psdd_index(psdd), lgc_index(lgc) )
+        cached_value = cache.get_f(psdd_index(psdd), lgc_index(lgc))
         if cached_value is not None:
             return cached_value
         
@@ -126,7 +122,8 @@ def exp_f_AND(psdd, lgc: LogisticCircuitNode, cache: EVCache, obsX):
 
     return np.copy(value)
 
-def exp_g_OR(psdd: PSddNode, lgc: LogisticCircuitNode, cache: EVCache, obsX):
+
+def exp_g_OR(psdd: PSddNode, lgc: LogisticAndChild, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     #pdb.set_trace()
     cached_value = cache.get_g(psdd_index(psdd), lgc_index(lgc))
     if cached_value is not None:
@@ -149,7 +146,7 @@ def exp_g_OR(psdd: PSddNode, lgc: LogisticCircuitNode, cache: EVCache, obsX):
                 PHI_K = k.parameter
                 temp_f_k += PHI_K * exp_f_AND(j, k, cache, obsX)
             
-            THETA_J = psdd.theta[j]
+            THETA_J = psdd.theta[j]  # TODO: why is this valid?
             temp_fg += THETA_J * temp_fg_k 
             temp_fg += THETA_J * temp_f_k
 
@@ -162,11 +159,11 @@ def exp_g_OR(psdd: PSddNode, lgc: LogisticCircuitNode, cache: EVCache, obsX):
 # def exp_fg_OR(psdd: PSddNode, lgc: LogisticCircuitNode, cache: EVCache, obsX):
 #     return exp_g_OR(psdd, lgc, cache, obsX)
 
-"""
-Given observation obsX does it agree/disagree with the leaf
-always agree if that variable not observed 
-"""
-def agrees(psdd, lgc: LogisticCircuitTerminal, obsX):
+def agrees(psdd: PSddNode, lgc: LogisticCircuitTerminal, obsX: np.ndarray) -> bool:
+    """
+    Given observation obsX does it agree/disagree with the leaf
+    always agree if that variable not observed
+    """
     idx = lgc.var_index - 1
     if obsX[idx] == -1:
         return True
@@ -174,13 +171,16 @@ def agrees(psdd, lgc: LogisticCircuitTerminal, obsX):
     if psdd.is_true():
         return obsX[idx] == lgc.var_value
     else:
-        #return obsX[idx] == (psdd.literal > 0)
+        # return obsX[idx] == (psdd.literal > 0)
         if psdd.literal > 0:
             return obsX[idx] == 1
         else:
             return obsX[idx] == 0
 
-def agrees_vectorized(psdd_isture, psdd_literal, lgc_var_index, lgc_var_val, obsX):
+
+# TODO: not sure if literal is int or float
+def agrees_vectorized(psdd_isture: bool, psdd_literal: float, lgc_var_index: int, lgc_var_val: int,
+                      obsX: np.ndarray) -> np.ndarray:
     idx = lgc_var_index - 1
     ans = np.zeros(obsX.shape[0], dtype='bool')
     for i in range(obsX.shape[0]):
@@ -195,8 +195,8 @@ def agrees_vectorized(psdd_isture, psdd_literal, lgc_var_index, lgc_var_val, obs
     return ans
 
 
-def exp_f_OR(psdd: PSddNode, lgc: LogisticCircuitNode, cache: EVCache, obsX):
-    cached_value = cache.get_f( psdd_index(psdd), lgc_index(lgc) )
+def exp_f_OR(psdd: PSddNode, lgc: LogisticAndChild, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
+    cached_value = cache.get_f(psdd_index(psdd), lgc_index(lgc))
     if cached_value is not None:
         return cached_value
 
@@ -236,7 +236,9 @@ def exp_f_OR(psdd: PSddNode, lgc: LogisticCircuitNode, cache: EVCache, obsX):
 
 ############################################################################
 
-def moment(psdd, lgc, moment, cache, obsX = None, extraBias = None):
+
+def moment(psdd: PSddNode, lgc: LogisticCircuit, moment: int, cache: EVCache, obsX: np.ndarray = None,
+           extraBias = None) -> np.ndarray:
     value = np.longdouble(0.0)
     if obsX is None:
         obsX = -1 * np.ones(lgc._num_variables)
@@ -269,12 +271,13 @@ def moment(psdd, lgc, moment, cache, obsX = None, extraBias = None):
     value /= p_observed
     return np.copy(value)
 
-def moment_g_AND(psdd, lgc: LogisticCircuitNode, moment, cache: EVCache, obsX):
+
+def moment_g_AND(psdd: PSddNode, lgc: LogisticAndGate, moment: int, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     if moment == 0:
-        return np.ones( (obsX.shape[0], 1), dtype='float') # np.float64(1.0)
+        return np.ones( (obsX.shape[0], 1), dtype='float')  # np.float64(1.0)
     
     prime, sub = psdd
-    cached_value = cache.get_moment_g( psdd_index(psdd), lgc_index(lgc) , moment)
+    cached_value = cache.get_moment_g(psdd_index(psdd), lgc_index(lgc), moment)
     if cached_value is not None:
         return cached_value
 
@@ -284,20 +287,21 @@ def moment_g_AND(psdd, lgc: LogisticCircuitNode, moment, cache: EVCache, obsX):
         B = moment_g_OR(sub, lgc.sub, moment - z, cache, obsX)
         value += choose(moment, z) * A * B
 
-    cache.put_moment_g( psdd_index(psdd), lgc_index(lgc) , moment, value)
+    cache.put_moment_g(psdd_index(psdd), lgc_index(lgc), moment, value)
     return np.copy(value)
 
-def moment_fg_AND(psdd, lgc: LogisticCircuitNode, moment, cache: EVCache, obsX):
+
+def moment_fg_AND(psdd: PSddNode, lgc: LogisticAndGate, moment: int, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     if moment == 0:
         return exp_f_AND(psdd, lgc, cache, obsX)
 
     prime, sub = psdd
-    cached_value = cache.get_moment_fg( psdd_index(psdd), lgc_index(lgc) , moment)
+    cached_value = cache.get_moment_fg(psdd_index(psdd), lgc_index(lgc), moment)
     if cached_value is not None:
         return cached_value
     
-    value = np.zeros( (obsX.shape[0], 1), dtype='float') # np.float64(0.0)
-    for z in range(0 , moment + 1):
+    value = np.zeros((obsX.shape[0], 1), dtype='float') # np.float64(0.0)
+    for z in range(0, moment + 1):
         if isinstance(lgc, LogisticCircuitTerminal):
             raise("should not happen, and in logistic circuit being terminal")
 
@@ -313,13 +317,13 @@ def moment_fg_AND(psdd, lgc: LogisticCircuitNode, moment, cache: EVCache, obsX):
 
         value = value + choose(moment, z) *  A * B
 
-    cache.put_moment_fg( psdd_index(psdd), lgc_index(lgc) , moment, value)
+    cache.put_moment_fg(psdd_index(psdd), lgc_index(lgc), moment, value)
     return np.copy(value)
 
 
-def moment_g_OR(psdd: PSddNode, lgc: LogisticCircuitNode, moment, cache: EVCache, obsX):
+def moment_g_OR(psdd: PSddNode, lgc: LogisticAndChild, moment: int, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     if moment == 0:
-        return np.ones( (obsX.shape[0], 1), dtype='float') #np.float64(1.0)
+        return np.ones((obsX.shape[0], 1), dtype='float')  # np.float64(1.0)
     # if moment == 1:
     #     return exp_g_OR(psdd, lgc, cache, obsX)
 
@@ -328,16 +332,16 @@ def moment_g_OR(psdd: PSddNode, lgc: LogisticCircuitNode, moment, cache: EVCache
         return cached_value
 
     if isinstance(lgc, LogisticCircuitTerminal):
-        value = np.zeros( (obsX.shape[0], 1), dtype='float') #np.float64(0.0)
+        value = np.zeros((obsX.shape[0], 1), dtype='float')  # np.float64(0.0)
     elif not psdd.is_decomposition():
         raise Exception("should not go here, unhandled")
     else:      
-        value = np.zeros( (obsX.shape[0], 1), dtype='float') # np.float64(0.0)
+        value = np.zeros( (obsX.shape[0], 1), dtype='float')  # np.float64(0.0)
         for j in psdd.elements:
             temp_j_sum = np.float64(0.0)
             for k in lgc.elements:
                 for z in range(0, moment+1):
-                    #A = psdd.theta[j]
+                    # A = psdd.theta[j]
                     B = (k.parameter)**(moment - z)           
                     C = moment_fg_AND(j, k, z, cache, obsX)
 
@@ -348,31 +352,34 @@ def moment_g_OR(psdd: PSddNode, lgc: LogisticCircuitNode, moment, cache: EVCache
     cache.put_moment_g(psdd_index(psdd), lgc_index(lgc), moment, value)
     return np.copy(value)
 
-def moment_fg_OR(psdd: PSddNode, lgc: LogisticCircuitNode, moment, cache: EVCache, obsX):
+
+def moment_fg_OR(psdd: PSddNode, lgc: LogisticAndChild, moment: int, cache: EVCache, obsX: np.ndarray) -> np.ndarray:
     if moment == 0:
         return exp_f_OR(psdd, lgc, cache, obsX)
     return moment_g_OR(psdd, lgc, moment, cache, obsX)
 
 
-def forward_comp_exp(cache: EVCache, obsX):        
+def forward_comp_exp(cache: EVCache, obsX: np.ndarray) -> NoReturn:
     cache.f_cache.clear()
     cache.g_cache.clear()
     cache.fg_cache.clear()
-    for computation in cache.exp_order[::-1]:
-        if computation[0] == "f":
-            if isinstance(computation[2], LogisticAndGate):
-                exp_f_AND(computation[1], computation[2], cache, obsX)
+    for (types, psdd_id, lgc_id) in cache.exp_order[::-1]:
+        # TODO: this conflicts with the desire for EVCache to use cache IDs
+        types: str
+        psdd_id: PSddNode
+        lgc_id: Union[LogisticAndChild, LogisticAndGate]
+        if types == "f":
+            if isinstance(lgc_id, LogisticAndGate):
+                exp_f_AND(psdd_id, lgc_id, cache, obsX)
             else:
-                exp_f_OR(computation[1], computation[2], cache, obsX) 
-        elif computation[0] == "g":
-            if isinstance(computation[2], LogisticAndGate):
-                exp_g_AND(computation[1], computation[2], cache, obsX)
+                exp_f_OR(psdd_id, lgc_id, cache, obsX)
+        elif types == "g":
+            if isinstance(lgc_id, LogisticAndGate):
+                exp_g_AND(psdd_id, lgc_id, cache, obsX)
             else:
-                exp_g_OR(computation[1], computation[2], cache, obsX) 
+                exp_g_OR(psdd_id, lgc_id, cache, obsX)
         else:
-            if isinstance(computation[2], LogisticAndGate):
-                exp_fg_AND(computation[1], computation[2], cache, obsX)
+            if isinstance(lgc_id, LogisticAndGate):
+                exp_fg_AND(psdd_id, lgc_id, cache, obsX)
             else:
-                exp_g_OR(computation[1], computation[2], cache, obsX) 
-
-        
+                exp_g_OR(psdd_id, lgc_id, cache, obsX)

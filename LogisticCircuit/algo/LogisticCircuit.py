@@ -5,12 +5,19 @@ import logging
 from time import perf_counter
 
 import numpy as np
+from numpy.random import RandomState
 
 from ..algo.LogisticRegression import LogisticRegression
-from ..structure.AndGate import AndGate
-from ..structure.CircuitNode import CircuitNode, OrGate, CircuitTerminal
+from ..algo.BayesianRegression import BayesianRidge
+from ..algo.BayesianLogistic import EBLogisticRegression, VBLogisticRegression
+from ..structure.AndGate import AndGate, AndChildNode
+from ..structure.CircuitNode import OrGate, CircuitTerminal
 from ..structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE
 from ..structure.Vtree import Vtree
+from ..util.DataSet import DataSet
+
+from typing import List, Dict, Set, Tuple, Optional, Union, TextIO, NoReturn
+
 
 FORMAT = """c variables (from inputs) start from 1
 c ids of logistic circuit nodes start from 0
@@ -32,7 +39,22 @@ c
 
 
 class LogisticCircuit(object):
-    def __init__(self, vtree, num_classes, circuit_file=None, rand_gen=None):
+    _vtree: Vtree
+    _num_classes: int
+    _largest_index: int
+    _num_variables: int
+
+    rand_gen: RandomState
+
+    _terminal_nodes: List[Optional[CircuitTerminal]]
+    _decision_nodes: Optional[List[OrGate]]
+    _elements: Optional[List[AndGate]]
+    _parameters: Optional[np.ndarray]
+    _bias: np.ndarray
+    _root: OrGate
+
+    def __init__(self, vtree: Vtree, num_classes: int, circuit_file: Optional[TextIO] = None,
+                 rand_gen: Optional[RandomState] = None):
         self._vtree = vtree
         self._num_classes = num_classes
         self._largest_index = 0
@@ -46,7 +68,6 @@ class LogisticCircuit(object):
         self._decision_nodes = None
         self._elements = None
         self._parameters = None
-        #self._bias = self.rand_gen.random_sample(size=(num_classes,))
         self._bias = self.rand_gen.random_sample(size=(num_classes,))
 
         if circuit_file is None:
@@ -58,40 +79,40 @@ class LogisticCircuit(object):
         self._serialize()
 
     @property
-    def vtree(self):
+    def vtree(self) -> Vtree:
         return self._vtree
 
     @property
-    def num_parameters(self):
+    def num_parameters(self) -> int:
         return self._parameters.size
 
     @property
-    def parameters(self):
+    def parameters(self) -> Optional[np.ndarray]:
         return self._parameters
 
-    def _generate_all_terminal_nodes(self, vtree: Vtree):
+    def _generate_all_terminal_nodes(self, vtree: Vtree) -> NoReturn:
         if vtree.is_leaf():
             var_index = vtree.var
             self._terminal_nodes[var_index - 1] = CircuitTerminal(
-                self._largest_index, vtree, var_index, LITERAL_IS_TRUE, self.rand_gen.random_sample(
-                    size=(self._num_classes,))
+                self._largest_index, vtree, var_index, LITERAL_IS_TRUE,
+                self.rand_gen.random_sample(size=(self._num_classes,))
             )
             self._largest_index += 1
             self._terminal_nodes[self._num_variables + var_index - 1] = CircuitTerminal(
-                self._largest_index, vtree, var_index, LITERAL_IS_FALSE, self.rand_gen.random_sample(
-                    size=(self._num_classes,))
+                self._largest_index, vtree, var_index, LITERAL_IS_FALSE,
+                self.rand_gen.random_sample(size=(self._num_classes,))
             )
             self._largest_index += 1
         else:
             self._generate_all_terminal_nodes(vtree.left)
             self._generate_all_terminal_nodes(vtree.right)
 
-    def _new_logistic_psdd(self, vtree) -> CircuitNode:
-        left_vtree = vtree.left
-        right_vtree = vtree.right
-        prime_variable = left_vtree.var
-        sub_variable = right_vtree.var
-        elements = list()
+    def _new_logistic_psdd(self, vtree: Vtree) -> OrGate:
+        left_vtree: Vtree = vtree.left
+        right_vtree: Vtree = vtree.right
+        prime_variable: int = left_vtree.var
+        sub_variable: int = right_vtree.var
+        elements: List[AndGate] = list()
         if left_vtree.is_leaf() and right_vtree.is_leaf():
             elements.append(
                 AndGate(
@@ -168,14 +189,14 @@ class LogisticCircuit(object):
         self._largest_index += 1
         return root
 
-    def _serialize(self):
+    def _serialize(self) -> NoReturn:
         """Serialize all the decision nodes in the logistic psdd.
            Serialize all the elements in the logistic psdd. """
         self._decision_nodes = [self._root]
         self._elements = []
         decision_node_indices = set()
         decision_node_indices.add(self._root.index)
-        unvisited = deque()
+        unvisited: deque[OrGate] = deque()
         unvisited.append(self._root)
         while len(unvisited) > 0:
             current = unvisited.popleft()
@@ -200,8 +221,7 @@ class LogisticCircuit(object):
                 (self._parameters, element.parameter.reshape(-1, 1)), axis=1)
         gc.collect()
 
-    def _record_learned_parameters(self, parameters):
-        #
+    def _record_learned_parameters(self, parameters: np.ndarray) -> NoReturn:
         # hack for the binary classification case in sklearn
         # FIXME: generalize this
         if self._num_classes == 2:
@@ -216,8 +236,8 @@ class LogisticCircuit(object):
             self._elements[i].parameter = self._parameters[:, i + 1 + 2 * self._num_variables]
         gc.collect()
 
-    def calculate_features(self, images: np.array):
-        num_images = images.shape[0]
+    def calculate_features(self, images: np.ndarray) -> np.ndarray:
+        num_images: int = images.shape[0]
         for terminal_node in self._terminal_nodes:
             terminal_node.calculate_prob(images)
         for decision_node in reversed(self._decision_nodes):
@@ -239,8 +259,8 @@ class LogisticCircuit(object):
             element.prob = None
         return features.T
 
-    def _select_element_and_variable_to_split(self, data, num_splits):
-        y = self.predict_prob(data.features)
+    def _select_element_and_variable_to_split(self, data: DataSet, num_splits: int) -> List[Tuple[AndGate, int]]:
+        y: np.ndarray = self.predict_prob(data.features)
 
         delta = data.one_hot_labels - y
         element_gradients = np.stack(
@@ -255,23 +275,21 @@ class LogisticCircuit(object):
 
         # print(element_gradient_variance, 'EGV')
 
-        candidates = sorted(
+        candidates: List[Tuple[AndGate, np.ndarray, np.ndarray]] = sorted(
             zip(self._elements, element_gradient_variance,
                 data.features.T[2 * self._num_variables + 1:]),
             reverse=True,
             key=lambda x: x[1],
         )
-        selected = []
+        selected: List[Tuple[Tuple[AndGate, int], float]] = []
         # print(len(candidates), candidates)
-        for candidate in candidates[: min(5000, len(candidates))]:
-            element_to_split = candidate[0]
-            if len(element_to_split.splittable_variables) > 0 and np.sum(candidate[2]) > 25:
-                original_feature = candidate[2]
-                original_variance = candidate[1]
-                variable_to_split = None
+        for (element_to_split, original_variance, original_feature) in candidates[: min(5000, len(candidates))]:
+            if len(element_to_split.splittable_variables) > 0 and np.sum(original_feature) > 25:
+                variable_to_split: Optional[int] = None
                 min_after_split_variance = float("inf")
                 # print('SPLIT', element_to_split.splittable_variables)
                 for variable in element_to_split.splittable_variables:
+                    variable: int
                     left_feature = original_feature * data.images[:, variable - 1]
                     right_feature = original_feature - left_feature
 
@@ -294,13 +312,13 @@ class LogisticCircuit(object):
                         variable_to_split = variable
                 # print('VARS', min_after_split_variance, 'ORIG', original_variance)
                 if min_after_split_variance < original_variance:
+                    assert variable_to_split is not None
                     improved_amount = min_after_split_variance - original_variance
                     # print('imp amount', improved_amount, len(selected))
                     if len(selected) == num_splits:
                         if improved_amount < selected[0][1]:
                             selected = selected[1:]
-                            selected.append(
-                                ((element_to_split, variable_to_split), improved_amount))
+                            selected.append(((element_to_split, variable_to_split), improved_amount))
                             selected.sort(key=lambda x: x[1])
                     else:
                         selected.append(((element_to_split, variable_to_split), improved_amount))
@@ -309,7 +327,7 @@ class LogisticCircuit(object):
         gc.collect()
         return [x[0] for x in selected]
 
-    def _split(self, element_to_split, variable_to_split, depth):
+    def _split(self, element_to_split: AndGate, variable_to_split: int, depth: int) -> NoReturn:
         parent = element_to_split.parent
         original_element, copied_element = self._copy_and_modify_element_for_split(
             element_to_split, variable_to_split, 0, depth
@@ -318,11 +336,13 @@ class LogisticCircuit(object):
             raise ValueError("Split elements become invalid.")
         parent.add_element(copied_element)
 
-    def _copy_and_modify_element_for_split(self, original_element, variable, current_depth, max_depth):
+    def _copy_and_modify_element_for_split(self, original_element: AndGate, variable: int, current_depth: int,
+                                           max_depth: int) -> Tuple[Optional[AndGate], Optional[AndGate]]:
         original_element.flag = True
         original_element.remove_splittable_variable(variable)
-        original_prime = original_element.prime
-        original_sub = original_element.sub
+        original_prime: AndChildNode = original_element.prime
+        original_sub: AndChildNode = original_element.sub
+        copied_element: Optional[AndGate]
         if current_depth >= max_depth:
             if variable in original_prime.vtree.variables:
                 original_prime, copied_prime = self._copy_and_modify_node_for_split(
@@ -357,10 +377,12 @@ class LogisticCircuit(object):
             original_element = None
         return original_element, copied_element
 
-    def _copy_and_modify_node_for_split(self, original_node, variable, current_depth, max_depth):
+    def _copy_and_modify_node_for_split(self, original_node: AndChildNode, variable: int, current_depth: int,
+                                        max_depth: int) -> Tuple[Optional[AndChildNode], Optional[AndChildNode]]:
         if original_node.num_parents == 0:
             raise ValueError("Some node does not have a parent.")
         original_node.decrease_num_parents_by_one()
+        copied_node: Optional[AndChildNode]
         if isinstance(original_node, CircuitTerminal):
             if original_node.var_index == variable:
                 if original_node.var_value == LITERAL_IS_TRUE:
@@ -401,7 +423,7 @@ class LogisticCircuit(object):
                 original_node = None
             return original_node, copied_node
 
-    def _deep_copy_node(self, node, variable, current_depth, max_depth):
+    def _deep_copy_node(self, node: AndChildNode, variable: int, current_depth: int, max_depth: int) -> AndChildNode:
         if isinstance(node, CircuitTerminal):
             return node
         else:
@@ -414,7 +436,8 @@ class LogisticCircuit(object):
             self._largest_index += 1
             return OrGate(self._largest_index, node.vtree, copied_elements)
 
-    def _deep_copy_element(self, element, variable, current_depth, max_depth):
+    def _deep_copy_element(self, element: AndGate, variable: int, current_depth: int, max_depth: int) -> AndGate:
+        copied_element: AndGate
         if current_depth >= max_depth:
             if variable in element.prime.vtree.variables:
                 copied_element = AndGate(
@@ -440,17 +463,17 @@ class LogisticCircuit(object):
         copied_element.splittable_variables = copy.deepcopy(element.splittable_variables)
         return copied_element
 
-    def calculate_accuracy(self, data):
+    def calculate_accuracy(self, data: DataSet) -> float:
         """Calculate accuracy given the learned parameters on the provided data."""
         y = self.predict(data.features)
         accuracy = np.sum(y == data.labels) / data.num_samples
         return accuracy
 
-    def predict(self, features):
+    def predict(self, features: np.ndarray) -> np.ndarray:
         y = self.predict_prob(features)
         return np.argmax(y, axis=1)
 
-    def predict_prob(self, features):
+    def predict_prob(self, features: np.ndarray) -> np.ndarray:
         """Predict the given images by providing their corresponding features."""
         y = 1.0 / (1.0 + np.exp(-np.dot(features, self._parameters.T)))
         print(y.shape[0])
@@ -463,34 +486,46 @@ class LogisticCircuit(object):
             return ans
         return y
 
-    def learn_parameters(self, data, num_iterations, num_cores=-1, C=10, rand_gen=None):
+    def learn_parameters(self, data: DataSet, num_iterations: int, num_cores: int = -1,
+                         C: Union[List[float], int] = 10, rand_gen: Union[int, RandomState, None] = None) -> NoReturn:
         """Logistic Psdd's parameter learning is reduced to logistic regression.
         We use mini-batch SGD to optimize the parameters."""
-        model = LogisticRegression(
-            solver="saga",
+        # model = LogisticRegression(
+        #     solver="saga",
+        #     fit_intercept=False,
+        #     multi_class="ovr",
+        #     max_iter=num_iterations,
+        #     C=C,
+        #     warm_start=True,
+        #     tol=1e-5,
+        #     coef_=self._parameters,
+        #     n_jobs=num_cores,
+        #     random_state=rand_gen
+        # )
+        model = VBLogisticRegression(
+            #solver="saga",
             fit_intercept=False,
-            multi_class="ovr",
-            max_iter=num_iterations,
-            C=C,
-            warm_start=True,
+            n_iter=num_iterations,
+            #C=C,
             tol=1e-5,
-            coef_=self._parameters,
             n_jobs=num_cores,
-            random_state=rand_gen
+            coef=self.parameters
         )
+        print("About to fit model")
         model.fit(data.features, data.labels)
-        self._record_learned_parameters(model.coef_)
         gc.collect()
+        print("Covariance:", np.sum(model.sigma_), np.shape(model.sigma_))
+        self._record_learned_parameters(model.coef_)
 
-    def change_structure(self, data, depth, num_splits):
-        splits = self._select_element_and_variable_to_split(data, num_splits)
+    def change_structure(self, data: DataSet, depth: int, num_splits: int) -> NoReturn:
+        splits: List[Tuple[AndGate, int]] = self._select_element_and_variable_to_split(data, num_splits)
         print(len(splits), "SPLITS")
         for element_to_split, variable_to_split in splits:
             if not element_to_split.flag:
                 self._split(element_to_split, variable_to_split, depth)
         self._serialize()
 
-    def save(self, f):
+    def save(self, f: TextIO) -> NoReturn:
         self._serialize()
         f.write(FORMAT)
         f.write(f"Logisitic Circuit\n")
@@ -503,83 +538,97 @@ class LogisticCircuit(object):
             f.write(f" {parameter}")
         f.write("\n")
 
-    def load(self, f):
+    def load(self, f: TextIO) -> OrGate:
         # read the format at the beginning
         line = f.readline()
         while line[0] == "c":
             line = f.readline()
 
         # serialize the vtree
-        vtree_nodes = dict()
-        unvisited_vtree_nodes = deque()
+        vtree_nodes: Dict[int, Vtree] = dict()
+        unvisited_vtree_nodes: deque[Vtree] = deque()
         unvisited_vtree_nodes.append(self._vtree)
         while len(unvisited_vtree_nodes):
-            node = unvisited_vtree_nodes.popleft()
+            node: Vtree = unvisited_vtree_nodes.popleft()
             vtree_nodes[node.index] = node
             if not node.is_leaf():
                 unvisited_vtree_nodes.append(node.left)
                 unvisited_vtree_nodes.append(node.right)
 
-        # extract the saved logistic circuit
-        nodes = dict()
+        # extract the terminal nodes
+        terminal_nodes: Optional[Dict[int, Tuple[CircuitTerminal, Set[int]]]] = dict()
         line = f.readline()
         while line[0] == "T" or line[0] == "F":
             line_as_list = line.strip().split(" ")
             positive_literal, var = (line_as_list[0] == "T"), int(line_as_list[3])
             index, vtree_index = int(line_as_list[1]), int(line_as_list[2])
-            parameters = []
+            parameters: List[float] = []
             for i in range(self._num_classes):
                 parameters.append(float(line_as_list[4 + i]))
-            parameters = np.array(parameters, dtype=np.float64)
             if positive_literal:
-                nodes[index] = (CircuitTerminal(index, vtree_nodes[vtree_index],
-                                                var, LITERAL_IS_TRUE, parameters), {var})
+                terminal_nodes[index] = (
+                    CircuitTerminal(index, vtree_nodes[vtree_index], var, LITERAL_IS_TRUE,
+                                    np.array(parameters, dtype=np.float64)),
+                    {var}
+                )
             else:
-                nodes[index] = (CircuitTerminal(index, vtree_nodes[vtree_index],
-                                                var, LITERAL_IS_FALSE, parameters), {-var})
+                terminal_nodes[index] = (
+                    CircuitTerminal(index, vtree_nodes[vtree_index], var, LITERAL_IS_FALSE,
+                                    np.array(parameters, dtype=np.float64)),
+                    {-var}
+                )
             self._largest_index = max(self._largest_index, index)
             line = f.readline()
 
-        self._terminal_nodes = [x[0] for x in nodes.values()]
+        self._terminal_nodes = [x[0] for x in terminal_nodes.values()]
         self._terminal_nodes.sort(key=lambda x: (-x.var_value, x.var_index))
+
         if len(self._terminal_nodes) != 2 * self._num_variables:
             raise ValueError(
                 "Number of terminal nodes recorded in the circuit file "
                 "does not match 2 * number of variables in the provided vtree."
             )
 
-        root = None
+        # Broaden type hints from circuit terminal to circuit node
+        nodes: Dict[int, Tuple[AndChildNode, Set[int]]] = terminal_nodes
+        terminal_nodes = None
+
+        # Read decision nodes, creates both And and Or gates
+        root: Optional[OrGate] = None
         while line[0] == "D":
             line_as_list = line.strip().split(" ")
-            index, vtree_index, num_elements = int(line_as_list[1]), int(
-                line_as_list[2]), int(line_as_list[3])
-            elements = []
-            variables = set()
+            index, vtree_index, num_elements = int(line_as_list[1]), int(line_as_list[2]), int(line_as_list[3])
+            elements: List[AndGate] = []
+            variables: Set[int] = set()
             for i in range(num_elements):
                 prime_index = int(line_as_list[i * (self._num_classes + 2) + 4].strip("("))
                 sub_index = int(line_as_list[i * (self._num_classes + 2) + 5])
-                element_variables = nodes[prime_index][1].union(nodes[sub_index][1])
+                element_variables: Set[int] = nodes[prime_index][1].union(nodes[sub_index][1])
                 variables = variables.union(element_variables)
-                splittable_variables = set()
+                splittable_variables: Set[int] = set()
                 for variable in element_variables:
                     if -variable in element_variables:
                         splittable_variables.add(abs(variable))
-                parameters = []
+                parameters: List[float] = []
                 for j in range(self._num_classes):
                     parameters.append(
                         float(line_as_list[i * (self._num_classes + 2) + 6 + j].strip(")")))
-                parameters = np.array(parameters, dtype=np.float64)
-                elements.append(AndGate(nodes[prime_index][0], nodes[sub_index][0], parameters))
+                elements.append(AndGate(nodes[prime_index][0], nodes[sub_index][0], np.array(parameters, dtype=np.float64)))
                 elements[-1].splittable_variables = splittable_variables
-            nodes[index] = (OrGate(index, vtree_nodes[vtree_index], elements), variables)
-            root = nodes[index][0]
+            root = OrGate(index, vtree_nodes[vtree_index], elements)
+            nodes[index] = (root, variables)
             self._largest_index = max(self._largest_index, index)
             line = f.readline()
+
+        # Ensure the file contained at least one decision node
+        if root is None:
+            raise ValueError("Circuit must have at least one decision node to represent the root node")
 
         if line[0] != "B":
             raise ValueError("The last line in a circuit file must record the bias parameters.")
         self._bias = np.array([float(x) for x in line.strip().split(" ")[1:]], dtype=np.float64)
 
+        del nodes
         gc.collect()
         return root
 
@@ -589,20 +638,20 @@ class LogisticCircuit(object):
 
 
 def learn_logistic_circuit(
-    vtree,
-    n_classes,
+    vtree: Vtree,
+    n_classes: int,
     # train_x, train_y,
-    train,
-    valid=None,
-    max_iter_sl=1000,
-    max_iter_pl=1000,
-    depth=20,
-    num_splits=10,
-    C=10,
-    validate_every=10,
-    patience=2,
-    rand_gen=None,
-):
+    train: DataSet,
+    valid: Optional[DataSet] = None,
+    max_iter_sl: int = 1000,
+    max_iter_pl: int = 1000,
+    depth: int = 20,
+    num_splits: int = 10,
+    C: Union[List[float], int] = 10,
+    validate_every: int = 10,
+    patience: int = 2,
+    rand_gen: Optional[RandomState] = None
+) -> Tuple[LogisticCircuit, List[float]]:
 
     # #
     # # FIXEME: do we need this?
@@ -611,19 +660,19 @@ def learn_logistic_circuit(
 
     # train = Dataset(train_x, train_y)
 
-    accuracy_history = []
+    accuracy_history: List[float] = []
 
     circuit = LogisticCircuit(vtree, n_classes, rand_gen=rand_gen)
     train.features = circuit.calculate_features(train.images)
 
     logging.info(f"The starting circuit has {circuit.num_parameters} parameters.")
     train.features = circuit.calculate_features(train.images)
-    train_acc = circuit.calculate_accuracy(train)
+    train_acc: float = circuit.calculate_accuracy(train)
     logging.info(f" accuracy: {train_acc:.5f}")
     accuracy_history.append(train_acc)
 
     logging.info("Start structure learning.")
-    sl_start_t = perf_counter()
+    sl_start_t: float = perf_counter()
 
     valid_best = -np.inf
     best_model = copy.deepcopy(circuit)
@@ -639,7 +688,7 @@ def learn_logistic_circuit(
         circuit.learn_parameters(train, max_iter_pl, C=C, rand_gen=rand_gen)
         pl_end_t = perf_counter()
 
-        train_acc = circuit.calculate_accuracy(train)
+        train_acc: float = circuit.calculate_accuracy(train)
 
         logging.info(f"done iter {i+1}/{max_iter_sl} in {perf_counter() - cur_time} secs")
         logging.info(f"\tcircuit size: {circuit.num_parameters}")
@@ -664,7 +713,7 @@ def learn_logistic_circuit(
                 valid_best = valid_acc
                 c_patience = 0
 
-    sl_end_t = perf_counter()
+    sl_end_t: float = perf_counter()
     logging.info(f"Structure learning done in {sl_end_t - sl_start_t} secs")
 
     return best_model, accuracy_history

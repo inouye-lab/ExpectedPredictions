@@ -1,16 +1,18 @@
 import argparse
 import time
+from typing import Optional
 
 from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
 from LogisticCircuit.structure.Vtree import Vtree
+from LogisticCircuit.util.DataSet import DataSets
 from LogisticCircuit.util.mnist_data import read_data_sets
 
-FLAGS = None
+FLAGS: Optional[argparse.Namespace] = None
 
 
 def main():
     # read dataset and vtree
-    data = read_data_sets(FLAGS.data_path, FLAGS.percentage)
+    data: DataSets = read_data_sets(FLAGS.data_path, FLAGS.percentage)
     vtree = Vtree.read(FLAGS.vtree)
 
     # create a logistic circuit

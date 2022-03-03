@@ -6,7 +6,7 @@ import numpy as np
 from .DataSet import DataSet, DataSets
 
 
-def _read32(bytestream):
+def _read32(bytestream: gzip.GzipFile):
     dt = np.dtype(np.uint32).newbyteorder('>')
     return np.frombuffer(bytestream.read(4), dtype=dt)[0]
 
@@ -74,7 +74,7 @@ def crop_augment(images, target_side_length=26):
     return augmented_images
 
 
-def read_data_sets(dir, percentage=1.0):
+def read_data_sets(dir: str, percentage: float = 1.0) -> DataSets:
     train_image_file = 'train-images-idx3-ubyte.gz'
     train_label_file = 'train-labels-idx1-ubyte.gz'
     test_image_file = 't10k-images-idx3-ubyte.gz'
