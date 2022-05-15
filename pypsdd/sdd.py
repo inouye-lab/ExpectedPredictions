@@ -5,11 +5,13 @@ class SddNode:
     """Sentential Decision Diagram (SDD)"""
 
     # typedef's
-    FALSE,TRUE,LITERAL,DECOMPOSITION = 0,1,2,3
+    FALSE, TRUE, LITERAL, DECOMPOSITION = 0, 1, 2, 3
+
 
 ########################################
 # CONSTRUCTOR + BASIC FUNCTIONS
 ########################################
+
 
     def __init__(self,node_type,alpha,vtree,manager):
         """Constructor
@@ -23,11 +25,11 @@ class SddNode:
         self.node_type = node_type
         self.vtree = vtree
         if self.is_false() or self.is_true():
-            self.literal,self.elements = None,None
+            self.literal, self.elements = None, None
         elif self.is_literal():
-            self.literal,self.elements = alpha,None
-        else: # self.is_decomposition()
-            self.literal,self.elements = None,alpha
+            self.literal, self.elements = alpha, None
+        else:  # self.is_decomposition()
+            self.literal, self.elements = None, alpha
         if manager is None: self.id = None
         else: self.id = manager.new_id()
         self.data = None  # data field

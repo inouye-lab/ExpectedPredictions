@@ -18,7 +18,7 @@ from utils import predict_batch
 import statsmodels.imputation.mice as mice
 import pandas as pd
 
-from data import Inst, InstMap
+from pypsdd.data import Inst, InstMap
 
 from copy import deepcopy
 
@@ -207,7 +207,7 @@ def run_missing_exp(X_test, y_test, psdd, glc, setting):
                     psdd.clear_bits()
                 
                 if not isRegresion:
-                    throw("not implemented")
+                    raise("not implemented")
                 else:    
                     sample_predict_all = np.array(sample_predict_all)    
                     print(sample_predict_all)        
