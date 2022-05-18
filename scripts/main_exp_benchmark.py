@@ -149,8 +149,27 @@ if __name__ == '__main__':
     lgc.zero_grad()
     ans = circuit_expect.Expectation(psdd, lgc, cache, X)
     print(ans)
-    ans.backward(torch.ones((X.shape[0], CLASSES), dtype=torch.float))
+    ans.backward(torch.ones((X.shape[0], CLASSES), dtype=torch.float), create_graph=True)
+    # original grad vector
     print(lgc.parameters.grad)
+    # feature vector, matches gradient when no missing values
+    print(lgc.calculate_features(X))
+    oldGrad = lgc.parameters.grad.clone()
+
+    lgc.zero_grad()
+    def func(params):
+        lgc.set_node_parameters(params)
+        return circuit_expect.moment(psdd, lgc, 2, EVCache(), X)
+
+    hess = torch.autograd.functional.hessian(func, lgc.parameters.detach().clone())
+    print(hess)
+    features = lgc.calculate_features(X)
+    # feature multiplication, exact with no missing data
+    print(np.dot(features.T, features))
+    # gradient approximation
+    print(2 * np.dot(oldGrad.T, oldGrad))
+    # determine how close the gradient approximation is to the hessian
+    print((2 * np.dot(oldGrad.T, oldGrad)) - hess.numpy())
 
     # lgc.zero_grad()
     # cache = EVCache()
