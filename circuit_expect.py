@@ -6,6 +6,7 @@ from typing import NoReturn, Union
 
 import torch
 
+from LogisticCircuit.algo.BaseCircuit import BaseCircuit
 from LogisticCircuit.algo.RegressionCircuit import RegressionCircuit
 from pypsdd.data import Inst
 
@@ -22,7 +23,6 @@ from pypsdd.psdd import PSddNode
 from EVCache import EVCache, psdd_index, lgc_index
 
 ExpValue = torch.Tensor
-FeatureCircuit = Union[LogisticCircuit, RegressionCircuit]
 
 N_comb = 31
 COMB = np.zeros((N_comb, N_comb), dtype='float')
@@ -36,7 +36,7 @@ def choose(n, m):
     # return np.float64(1.0) * comb(n, m, exact=True)
 
 
-def Expectation(psdd: PSddNode, lgc: FeatureCircuit, cache: EVCache, obsX: np.ndarray = None) -> ExpValue:
+def Expectation(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: np.ndarray = None) -> ExpValue:
     """
     Main function to call
 
@@ -243,9 +243,9 @@ def exp_f_OR(psdd: PSddNode, lgc: LogisticAndChild, cache: EVCache, obsX: np.nda
 ############################################################################
 
 
-def moment(psdd: PSddNode, lgc: FeatureCircuit, moment: int, cache: EVCache, obsX: np.ndarray = None,
+def moment(psdd: PSddNode, lgc: BaseCircuit, moment: int, cache: EVCache, obsX: np.ndarray = None,
            extraBias = None) -> ExpValue:
-    value = np.longdouble(0.0)
+    value = 0  # np.longdouble(0.0)
     if obsX is None:
         obsX = -1 * np.ones(lgc.num_variables)
         p_observed = torch.tensor(1.0)
@@ -255,13 +255,13 @@ def moment(psdd: PSddNode, lgc: FeatureCircuit, moment: int, cache: EVCache, obs
             inp = Inst.from_list(obsX[i], lgc.num_variables, zero_indexed=True)
             p_observed[i, :] = psdd.probability(inp)
 
-    BIAS = np.copy(np.longdouble(lgc.bias))
+    BIAS = lgc.bias.clone()
     if extraBias is not None:
         BIAS += extraBias
 
     for z in range(0, moment + 1):
-        if isinstance(lgc._root, LogisticAndGate):
-            temp = choose(moment, z) * (BIAS**z) * moment_g_AND(psdd, lgc._root, moment-z, cache, obsX)
+        if isinstance(lgc.root, LogisticAndGate):
+            temp = choose(moment, z) * (BIAS**z) * moment_g_AND(psdd, lgc.root, moment-z, cache, obsX)
             if z == moment:
                 # to cancel the effect of dividing bias**moment by p_observed
                 temp *= p_observed 
@@ -306,7 +306,7 @@ def moment_fg_AND(psdd: PSddNode, lgc: LogisticAndGate, moment: int, cache: EVCa
     if cached_value is not None:
         return cached_value
     
-    value = np.zeros((obsX.shape[0], 1), dtype='float')  # np.float64(0.0)
+    value = torch.zeros((obsX.shape[0], 1), dtype=torch.float64)  # np.float64(0.0)
     for z in range(0, moment + 1):
         if isinstance(lgc, LogisticCircuitTerminal):
             raise Exception("Should not happen, and in logistic circuit being terminal")
@@ -338,11 +338,11 @@ def moment_g_OR(psdd: PSddNode, lgc: LogisticAndChild, moment: int, cache: EVCac
         return cached_value
 
     if isinstance(lgc, LogisticCircuitTerminal):
-        value = np.zeros((obsX.shape[0], 1), dtype='float')  # np.float64(0.0)
+        value = torch.zeros((obsX.shape[0], 1), dtype=torch.float64)  # np.float64(0.0)
     elif not psdd.is_decomposition():
         raise Exception("should not go here, unhandled")
     else:      
-        value = np.zeros( (obsX.shape[0], 1), dtype='float')  # np.float64(0.0)
+        value = torch.zeros((obsX.shape[0], 1), dtype=torch.float64)  # np.float64(0.0)
         for j in psdd.elements:
             temp_j_sum = np.float64(0.0)
             for k in lgc.elements:
