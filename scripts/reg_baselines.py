@@ -1,3 +1,5 @@
+# Performs standard regression for comparison
+
 import argparse
 
 try:

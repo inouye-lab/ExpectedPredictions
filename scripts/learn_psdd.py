@@ -1,3 +1,5 @@
+# Learns the probabilistic circuit
+
 import sys
 sys.path.append("LogisticCircuit")
 sys.path.append("pypsdd")
@@ -22,7 +24,7 @@ import numpy as np
 
 from LogisticCircuit.structure.Vtree import generate_random_vtree
 
-LEARN_PSDD_CMD = 'export LD_LIBRARY_PATH="{}";java -jar {} learnPsdd search -v {} -m l-1 -o {} -d {} -b {} -e {} -p {}'
+LEARN_PSDD_CMD = 'export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:{}";java -jar {} learnPsdd search -v {} -m l-1 -o {} -d {} -b {} -e {} -p {}'
 
 
 def dump_data_csv(X, data_path):
@@ -177,6 +179,7 @@ if __name__ == '__main__':
 
     logging.info('Dumped data in learnPSDD format')
 
+    psdd_path = os.path.join(out_path, f'{dataset_name}.psdd')
     psdd_cmd = str(LEARN_PSDD_CMD)
     psdd_cmd = psdd_cmd.format(args.psdd_jar_path,
                                args.psdd_jar,
@@ -185,9 +188,8 @@ if __name__ == '__main__':
                                train_data_path,
                                valid_data_path,
                                args.psdd_n_iter,
-                               args.psdd_path)
+                               psdd_path)
 
-    psdd_path = os.path.join(out_path, f'{dataset_name}.psdd')
     logging.info(f'Executing LearnPSDD\n{psdd_cmd}')
     psdd_start_t = perf_counter()
     os.system(psdd_cmd)

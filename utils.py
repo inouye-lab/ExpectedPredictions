@@ -2,10 +2,15 @@
 # sys.path.append("LogisticCircuit")
 # sys.path.append("pypsdd")
 import numpy as np
+import torch
+
+from LogisticCircuit.structure.AndGate import AndGate
+from LogisticCircuit.structure.CircuitNode import CircuitNode, CircuitTerminal
 from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
 
 import pdb
 
+from pypsdd import PSddNode
 from pypsdd.vtree import Vtree as PSDD_Vtree
 from pypsdd.manager import PSddManager
 import pypsdd.psdd_io as psdd_io
@@ -19,6 +24,7 @@ import circuit_expect
 from sympy import *
 
 from scipy.special import expit
+from typing import Union, Optional
 
 from EVCache import EVCache
 
@@ -27,10 +33,11 @@ obsX[i] = -1 if unobserved, otherwise its the observation
 '''
 
 
-def brute_force_expectation(psdd, lgc, n, k=1, compute_prob=False, obsX=None):
+def brute_force_expectation(psdd: PSddNode, lgc: LogisticCircuit, n: int, k: int = 1, compute_prob: bool = False,
+                            obsX: Optional[np.ndarray] = None):
     sum = np.float64(0.0)
     sum_all_prob = np.float64(0.0)
-    run = 0
+    run: int = 0
 
     if obsX is None:
         obsX = np.array([-1 for i in range(n)])
@@ -50,7 +57,7 @@ def brute_force_expectation(psdd, lgc, n, k=1, compute_prob=False, obsX=None):
         inp = Inst.from_list(X, n, zero_indexed=True)
         lgc_features = lgc.calculate_features(np.array([X]))
 
-        f = np.dot(lgc_features, lgc._parameters.T)
+        f = np.dot(lgc_features, lgc.parameters.T)
         if compute_prob:
             f = 1.0 / (1.0 + np.exp(-f))
         else:
@@ -87,7 +94,8 @@ def print_psdd(psdd):
                 q.appendleft(e)
 
 
-def predict_batch(psdd, lgc, X_test, T=None, brute_force=False, n=None, prob=True, batch_size=1000, is_regression=False):
+def predict_batch(psdd: PSddNode, lgc: LogisticCircuit, X_test: np.ndarray, T=None, brute_force: bool = False, n=None,
+                  prob: bool = True, batch_size: int = 1000, is_regression: bool = False):
     if not brute_force and T is None:
         raise Exception("Specify T when using taylor approx")
 
@@ -103,7 +111,7 @@ def predict_batch(psdd, lgc, X_test, T=None, brute_force=False, n=None, prob=Tru
         print("Doing batch [{}:{}]".format(L, R))
         obsX = X_test[L:R]
         cache = EVCache()
-        exps = circuit_expect.Expectation(psdd, lgc, cache, obsX)
+        exps: np.ndarray = circuit_expect.Expectation(psdd, lgc, cache, obsX).numpy()
 
         if not is_regression:
             if brute_force:
@@ -128,10 +136,10 @@ T number taylor expansion
 """
 
 
-def sympy_taylor_aprox(psdd, lgc, cache, T, Alpha, obsX, extra_bias=False, print_debug=False):
+def sympy_taylor_aprox(psdd: PSddNode, lgc: LogisticCircuit, cache: EVCache, T, Alpha: np.ndarray, obsX, extra_bias=False, print_debug=False):
     assert(Alpha.shape[0] == obsX.shape[0])
 
-    classes = lgc._num_classes
+    classes = lgc.num_classes
     NN = obsX.shape[0]
     results = np.zeros((T + 1, NN, classes), dtype='float')
 

@@ -84,6 +84,10 @@ class LogisticCircuit(object):
         return self._vtree
 
     @property
+    def num_classes(self) -> int:
+        return self._num_classes
+
+    @property
     def num_variables(self) -> int:
         return self._num_variables
 

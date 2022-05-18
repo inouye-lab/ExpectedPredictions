@@ -1,7 +1,6 @@
+# Trains a regression circuit
+
 import sys
-sys.path.append("LogisticCircuit")
-sys.path.append("pypsdd")
-sys.path.append('.')
 
 import argparse
 
@@ -170,6 +169,8 @@ if __name__ == '__main__':
     # load the vtree or create it from scratch
     if args.vtree == 'balanced':
         v = generate_random_vtree(n_vars=n_features, rand_gen=rand_gen, balanced=True)
+    else:
+        raise Exception("Currently only supports balanced vtree")
     vtree_path = os.path.join(out_path, f'{dataset_name}.vtree')
     v.save(vtree_path)
 
