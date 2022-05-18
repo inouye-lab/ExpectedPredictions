@@ -10,8 +10,9 @@ import torch
 from numpy.random import RandomState
 from sklearn.metrics import mean_squared_error
 
-# from algo.Ridge import Ridge
+# from .Ridge import Ridge
 from sklearn.linear_model import Ridge
+from .BayesianRegression import BayesianRidge, ARDRegression
 from ..structure.AndGate import AndGate, AndChildNode
 from ..structure.CircuitNode import OrGate, CircuitTerminal
 from ..structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE
@@ -530,30 +531,53 @@ class RegressionCircuit(object):
     #     y = 1.0 / (1.0 + np.exp(-np.dot(features, self._parameters.T)))
     #     return y
 
-    def learn_parameters(self, data: DataSet, num_iterations: int, num_cores: int = -1, alpha: float = 1.0,
+    def learn_parameters(self, data: DataSet, num_iterations: int, num_cores: int = -1,
+                         alpha: float = 1.0, alpha_1: float = 1e-6, alpha_2: float = 1e-6,
                          tol: float = 0.001, solver: str = "auto",
                          rand_gen: Union[int, RandomState, None] = None) -> NoReturn:
         """Logistic Psdd's parameter learning is reduced to logistic regression.
         We use mini-batch SGD to optimize the parameters."""
 
-        model = Ridge(
-            alpha=alpha,
-            fit_intercept=False,
-            normalize=False,
-            copy_X=True,
-            max_iter=num_iterations,
-            tol=tol,
-            solver=solver,
-            # coef_=self._parameters.numpy(),
-            random_state=rand_gen,
-        )
+        if solver == 'bayesian-ridge':
+            model = BayesianRidge(
+                alpha_1=alpha_1, alpha_2=alpha_2,
+                fit_intercept=False,
+                normalize=False,
+                copy_X=True,
+                # max_iter=num_iterations,
+                tol=tol,
+                coef=self._parameters.flatten().numpy(),
+                # random_state=rand_gen, TODO?
+            )
+        elif solver == 'bayesian-ard':
+            model = ARDRegression(
+                alpha_1=alpha_1, alpha_2=alpha_2,
+                fit_intercept=False,
+                normalize=False,
+                copy_X=True,
+                # max_iter=num_iterations,
+                tol=tol,
+                coef=self._parameters.flatten().numpy(),
+                # random_state=rand_gen, TODO?
+            )
+        # default to ridge and pass along solver
+        else:
+            model = Ridge(
+                alpha=alpha,
+                fit_intercept=False,
+                normalize=False,
+                copy_X=True,
+                max_iter=num_iterations,
+                tol=tol,
+                solver=solver,
+                # coef_=self._parameters,
+                random_state=rand_gen,
+            )
 
-        # model = LogisticRegression(solver='saga', fit_intercept=False,
-        #                            # multi_class='ovr',
-        #                            max_iter=num_iterations, C=10.0, warm_start=True, tol=1e-5,
-        #                            coef_=self._parameters, n_jobs=num_cores)
         print("About to fit model")
         model.fit(data.features, data.labels.numpy())
+        if solver in ('bayesian-ridge', 'bayesian-ard'):
+            print("Covariance:", np.sum(model.sigma_), np.shape(model.sigma_))
         # print('PARAMS', self._parameters.shape, model.coef_.shape)
 
         self._record_learned_parameters(model.coef_)
@@ -685,6 +709,7 @@ def learn_regression_circuit(
     vtree: Vtree,
     train: DataSet,
     valid: Optional[DataSet] = None,
+    solver: str = "auto",
     max_iter_sl: int = 1000,
     max_iter_pl: int = 1000,
     depth: int = 20,
@@ -726,7 +751,7 @@ def learn_regression_circuit(
 
         train.features = circuit.calculate_features(train.images)
         pl_start_t = perf_counter()
-        circuit.learn_parameters(train, max_iter_pl, rand_gen=rand_gen)
+        circuit.learn_parameters(train, max_iter_pl, rand_gen=rand_gen, solver=solver)
         pl_end_t = perf_counter()
 
         train_acc: float = circuit.calculate_error(train)

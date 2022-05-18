@@ -34,7 +34,7 @@ from LogisticCircuit.algo.LogisticRegression import LogisticRegression
 from LogisticCircuit.util.DataSet import DataSet
 from LogisticCircuit.algo.RegressionCircuit import learn_regression_circuit, RegressionCircuit
 
-LEARN_PSDD_CMD = 'export LD_LIBRARY_PATH="{}";java -jar {} learnPsdd search -v {} -m l-1 -o {} -d {} -b {} -e {}'
+LEARN_PSDD_CMD = 'export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:{}";java -jar {} learnPsdd search -v {} -m l-1 -o {} -d {} -b {} -e {}'
 
 
 def dump_data_csv(X, data_path):
@@ -85,6 +85,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--regression', action='store_true',
                         help='Regression instead of classification')
+    parser.add_argument("--solver", type=str, default="auto",
+                        help="Method used to compute the parameters for the circuit")
 
     parser.add_argument('--baseline', action='store_true',
                         help='Regression instead of classification')
@@ -204,7 +206,7 @@ if __name__ == '__main__':
                           copy_X=True,
                           max_iter=args.n_iter_pl,
                           tol=1e-5,
-                          solver='auto',
+                          solver='auto',  # TODO: baseline solver?
                           # coef_=self._parameters,
                           random_state=rand_gen,
                           )
@@ -230,6 +232,8 @@ if __name__ == '__main__':
 
         circuit, train_history = learn_regression_circuit(vtree=v,
                                                           train=train_data,
+                                                          valid=valid_data,
+                                                          solver=args.solver,
                                                           max_iter_sl=args.n_iter_sl,
                                                           max_iter_pl=args.n_iter_pl,
                                                           depth=args.depth,
@@ -240,7 +244,7 @@ if __name__ == '__main__':
     else:
         if args.baseline:
             logging.info('Training vanilla logistic regression as a baseline')
-            model = LogisticRegression(solver="saga",
+            model = LogisticRegression(solver="saga",  # TODO: baseline solver?
                                        fit_intercept=False,
                                        multi_class="ovr",
                                        max_iter=args.n_iter_pl,
@@ -270,6 +274,8 @@ if __name__ == '__main__':
         circuit, train_history = learn_logistic_circuit(vtree=v,
                                                         n_classes=n_classes,
                                                         train=train_data,
+                                                        valid=valid_data,
+                                                        solver=args.solver,
                                                         C=args.alpha,
                                                         max_iter_sl=args.n_iter_sl,
                                                         max_iter_pl=args.n_iter_pl,

@@ -503,33 +503,49 @@ class LogisticCircuit(object):
             return ans
         return y
 
-    def learn_parameters(self, data: DataSet, num_iterations: int, num_cores: int = -1,
+    def learn_parameters(self, data: DataSet, num_iterations: int, num_cores: int = -1, solver: str = "auto",
                          C: Union[List[float], int] = 10, rand_gen: Union[int, RandomState, None] = None) -> NoReturn:
         """Logistic Psdd's parameter learning is reduced to logistic regression.
         We use mini-batch SGD to optimize the parameters."""
-        # model = LogisticRegression(
-        #     solver="saga",
-        #     fit_intercept=False,
-        #     multi_class="ovr",
-        #     max_iter=num_iterations,
-        #     C=C,
-        #     warm_start=True,
-        #     tol=1e-5,
-        #     coef_=self._parameters.numpy(),
-        #     n_jobs=num_cores,
-        #     random_state=rand_gen
-        # )
-        model = VBLogisticRegression(
-            fit_intercept=False,
-            n_iter=num_iterations,
-            #C=C,
-            tol=1e-5,
-            n_jobs=num_cores,
-            coef=self.parameters.numpy()
-        )
+        if solver == 'variational-bayes':
+            model = VBLogisticRegression(
+                fit_intercept=False,
+                n_iter=num_iterations,
+                #C=C,
+                tol=1e-5,
+                n_jobs=num_cores,
+                coef=self.parameters.numpy()
+            )
+        elif solver == 'empirical-bayes':
+            model = EBLogisticRegression(
+                fit_intercept=False,
+                n_iter=num_iterations,
+                #C=C,
+                tol=1e-5,
+                n_jobs=num_cores,
+                coef=self.parameters.numpy()
+            )
+        else:
+            # original work used saga, treat as default
+            if solver == "auto":
+                solver = "saga"
+            model = LogisticRegression(
+                solver=solver,
+                fit_intercept=False,
+                multi_class="ovr",
+                max_iter=num_iterations,
+                C=C,
+                warm_start=True,
+                tol=1e-5,
+                coef_=self._parameters.numpy(),
+                n_jobs=num_cores,
+                random_state=rand_gen
+            )
         print("About to fit model")
-        print("Covariance:", np.sum(model.sigma_), np.shape(model.sigma_))
         model.fit(data.features, data.labels.numpy())
+        # todo: empirical-bayes does not get a matrix of variances, just a vector
+        if solver in ('variational-bayes', 'empirical-bayes'):
+            print("Covariance:", np.sum(model.sigma_), np.shape(model.sigma_))
         self._record_learned_parameters(model.coef_)
         gc.collect()
 
@@ -659,6 +675,7 @@ def learn_logistic_circuit(
     # train_x, train_y,
     train: DataSet,
     valid: Optional[DataSet] = None,
+    solver: str = "auto",
     max_iter_sl: int = 1000,
     max_iter_pl: int = 1000,
     depth: int = 20,
@@ -701,7 +718,7 @@ def learn_logistic_circuit(
 
         train.features = circuit.calculate_features(train.images)
         pl_start_t = perf_counter()
-        circuit.learn_parameters(train, max_iter_pl, C=C, rand_gen=rand_gen)
+        circuit.learn_parameters(train, max_iter_pl, C=C, rand_gen=rand_gen, solver=solver)
         pl_end_t = perf_counter()
 
         train_acc: float = circuit.calculate_accuracy(train)
