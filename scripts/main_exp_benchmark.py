@@ -1,4 +1,6 @@
 import sys
+
+import argparse
 import numpy as np
 import torch
 
@@ -43,15 +45,36 @@ def taylor_aprox(psdd, lgc, n):
     return sum
 
 
+"""Creates a bit field as an array for the given number"""
+def bitfield(number: int, size: int):
+    return [number >> i & 1 for i in range(size - 1, -1, -1)]
+
 
 if __name__ == '__main__':
     print("Loading Logistic Circuit..")
+    #########################################
+    # creating the opt parser
+    parser = argparse.ArgumentParser()
 
-    VTREE_FILE = "test/circuits/4.vtree"
-    GLC_FILE = "test/circuits/4.glc"
-    PSDD_FILE = "test/circuits/4.psdd"
-    CLASSES = 2
-    N = 4
+
+    parser.add_argument('model', type=str, help='Model to use for expectations')
+    parser.add_argument('--values', type=int, nargs='+', help='Input to the model')
+    parser.add_argument('--gen_values', type=str, default='zeroes', help='Generates a vector of values')
+
+    parser.add_argument("--classes", type=int, required=True,
+                        help="Number of classes in the dataset")
+    parser.add_argument("--variables", type=int, required=True,
+                        help="Number of variables in the dataset")
+    #
+    # parsing the args
+    args = parser.parse_args()
+
+    FOLDER = args.model
+    VTREE_FILE = FOLDER + ".vtree"
+    GLC_FILE = FOLDER + ".glc"
+    PSDD_FILE = FOLDER + ".psdd"
+    CLASSES = args.classes
+    N = args.variables
 
     # FOLDER = "notebooks/rand-gen-grid/exp-D9-N500-C6-B1/D9-N500-C6-B1"
     # VTREE_FILE = FOLDER + ".vtree"
@@ -107,7 +130,17 @@ if __name__ == '__main__':
         from time import time
         perf_counter = time
 
-    X = np.zeros( (1, N) ) 
+    if args.values is not None:
+        X = np.array([args.values])
+    elif args.gen_values == 'zeroes':
+        X = np.zeros((1, N), dtype=np.float64)
+    elif args.gen_values == 'ones':
+        X = np.ones((1, N), dtype=np.float64)
+    elif args.gen_values == 'all':
+        X = np.array([bitfield(n, N) for n in range(2**N)])
+    else:
+        raise Exception(f"Unknown generator '{args.gen_values}'")
+    print("Input ", X)
 
     start_t = perf_counter()
     cache = EVCache()
