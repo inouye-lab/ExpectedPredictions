@@ -136,6 +136,8 @@ if __name__ == '__main__':
         X = np.zeros((1, N), dtype=np.float64)
     elif args.gen_values == 'ones':
         X = np.ones((1, N), dtype=np.float64)
+    elif args.gen_values == 'none':
+        X = np.ones((1, N), dtype=np.float64) * -1
     elif args.gen_values == 'all':
         X = np.array([bitfield(n, N) for n in range(2**N)])
     else:
