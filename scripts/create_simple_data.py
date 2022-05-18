@@ -32,6 +32,12 @@ if __name__ == '__main__':
     parser.add_argument('--train_count', type=int,
                         help='Number of values to include in training')
 
+    parser.add_argument('--min', type=int, default=0,
+                        help='Min value to use for a Y value. If excluded, does 0')
+
+    parser.add_argument('--max', type=int, default=1,
+                        help='Max value to use for a Y value. If excluded, does boolean (0 or 1)')
+
     parser.add_argument('-v', '--verbose', type=int, nargs='?',
                         default=1,
                         help='Verbosity level')
@@ -66,11 +72,12 @@ if __name__ == '__main__':
     indexes = range(totalSamples)
     X = np.array([bitfield(n, args.features) for n in indexes])
     logging.info(f"X: \n{str(X)}")
-    Y = np.random.randint(0, 2, size=totalSamples)
+    Y = rand_gen.randint(args.min, args.max + 1, size=totalSamples)
+    # Y = X[:, 1] + X[:, 2] - X[:, 3] + 2*X[:, 0] + 5
     logging.info(f"Y: {str(Y)}")
 
     # Determine indexes to save as our training set
-    trainIndexes = np.random.choice(indexes, size=args.train_count, replace=False)
+    trainIndexes = rand_gen.choice(indexes, size=args.train_count, replace=False)
     logging.info(f"Training: {str(trainIndexes)}")
 
     # Build final datasets
