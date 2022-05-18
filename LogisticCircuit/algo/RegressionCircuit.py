@@ -147,7 +147,7 @@ class RegressionCircuit(BaseCircuit):
         self._parameters = torch.tensor(parameters, requires_grad=requires_grad).reshape(1, -1)
         # print("todo fix the _record_learned_parameters")
         # print('PARAMS', self._parameters.shape)
-        self._set_node_parameters(self._parameters)
+        self.set_node_parameters(self._parameters)
 
     # def calculate_accuracy(self, data):
     #     """Calculate accuracy given the learned parameters on the provided data."""

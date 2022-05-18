@@ -153,7 +153,7 @@ class LogisticCircuit(BaseCircuit):
             ))
         else:
             self._parameters = torch.tensor(parameters, requires_grad=requires_grad)  # copy.deepcopy(parameters)
-        self._set_node_parameters(self._parameters)
+        self.set_node_parameters(self._parameters)
 
     def learn_parameters(self, data: DataSet, num_iterations: int, num_cores: int = -1, solver: str = "auto",
                          C: Union[List[float], int] = 10, rand_gen: Union[int, RandomState, None] = None) -> NoReturn:

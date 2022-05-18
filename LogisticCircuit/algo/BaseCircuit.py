@@ -28,7 +28,7 @@ class BaseCircuit(object):
     _decision_nodes: Optional[List[OrGate]]
     _elements: Optional[List[AndGate]]
     _parameters: Optional[torch.Tensor]
-    _covariance: Optional[List[np.ndarray]]
+    _covariance: List[np.ndarray]
     _bias: torch.Tensor
     _root: OrGate
 
@@ -47,7 +47,7 @@ class BaseCircuit(object):
         self._decision_nodes = None
         self._elements = None
         self._parameters = None
-        self._covariance = None
+        self._covariance = []
 
         self._bias = torch.tensor(self.rand_gen.random_sample(size=self._parameter_size()))  # TODO: copy needed?
 
@@ -65,7 +65,7 @@ class BaseCircuit(object):
             # we need _parameters to be the source of the parameters in the node
             self._parameters = self._parameters.clone()
             self._parameters.requires_grad = True
-            self._set_node_parameters(self._parameters)
+            self.set_node_parameters(self._parameters)
             gc.collect()
 
     @property
@@ -93,12 +93,16 @@ class BaseCircuit(object):
     def parameters(self) -> Optional[torch.Tensor]:
         return self._parameters
 
-    """
-    Zeroes the gradient vector of the parameters vector
-    Note that when computing multiple gradients, its essential to recreate the expectation cache for each input
-    If using the same input for multiple gradients, it is nessesscary to retain the graph
-    """
+    @property
+    def covariance(self) -> List[np.ndarray]:
+        return self._covariance
+
     def zero_grad(self, requires_grad: bool = True):
+        """
+        Zeroes the gradient vector of the parameters vector
+        Note that when computing multiple gradients, its essential to recreate the expectation cache for each input
+        If using the same input for multiple gradients, it is nessesscary to retain the graph
+        """
         if self._parameters.grad is not None:
             # disable gradients if no longer needed
             if not requires_grad:
@@ -107,13 +111,14 @@ class BaseCircuit(object):
         # enforce that the circuit is either ready or not ready for gradients
         self._parameters.requires_grad = requires_grad
 
+
     @property
     def bias(self) -> torch.Tensor:
         return self._bias
 
-    """Gets the size of the parameters used in generation"""
     @abstractmethod
     def _parameter_size(self) -> Union[int, Tuple[int]]:
+        """Gets the size of the parameters used in generation"""
         pass
 
     def _generate_all_terminal_nodes(self, vtree: Vtree) -> NoReturn:
@@ -245,8 +250,11 @@ class BaseCircuit(object):
             self._parameters = torch.cat((self._parameters, element.parameter.reshape(-1, 1)), dim=1)
         gc.collect()
 
-    """Sets the parameters of the nodes from the given parameter tensor"""
-    def _set_node_parameters(self, parameters: torch.Tensor):
+    def set_node_parameters(self, parameters: torch.Tensor):
+        """
+        Sets the parameters of the nodes from the given parameter tensor.
+        Intentionally does not update self.parameters to allow more samples
+        """
         self._bias = parameters[:, 0]
         for i in range(len(self._terminal_nodes)):
             self._terminal_nodes[i].parameter = parameters[:, i + 1]
