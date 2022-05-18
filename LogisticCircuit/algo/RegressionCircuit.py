@@ -44,8 +44,9 @@ c
 
 # TODO: I feel this should extend LogisticCircuit instead of copying it, or maybe a shared base class
 class RegressionCircuit(BaseCircuit):
-    def __init__(self, vtree: Vtree, circuit_file: Optional[TextIO] = None, rand_gen: Optional[RandomState] = None):
-        super().__init__(vtree, 1, circuit_file, rand_gen)
+    def __init__(self, vtree: Vtree, circuit_file: Optional[TextIO] = None,
+                 rand_gen: Optional[RandomState] = None, requires_grad: bool = False):
+        super().__init__(vtree, 1, circuit_file, rand_gen, requires_grad)
 
     def _parameter_size(self) -> Union[int, Tuple[int]]:
         return 1

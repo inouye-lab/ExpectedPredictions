@@ -32,7 +32,8 @@ class BaseCircuit(object):
     _bias: torch.Tensor
     _root: OrGate
 
-    def __init__(self, vtree: Vtree, num_classes: int, circuit_file: Optional[TextIO] = None, rand_gen: Optional[RandomState] = None):
+    def __init__(self, vtree: Vtree, num_classes: int, circuit_file: Optional[TextIO] = None,
+                 rand_gen: Optional[RandomState] = None, requires_grad: bool = False):
         self._vtree = vtree
         self._num_classes = num_classes
         self._largest_index = 0
@@ -58,6 +59,15 @@ class BaseCircuit(object):
 
         self._serialize()
 
+        # enable torch for parameter gradient processing if requested
+        if requires_grad:
+            # due to the way the parameters are set up, not much easier way to do this
+            # we need _parameters to be the source of the parameters in the node
+            self._parameters = self._parameters.clone()
+            self._parameters.requires_grad = True
+            self._set_node_parameters(self._parameters)
+            gc.collect()
+
     @property
     def vtree(self) -> Vtree:
         return self._vtree
@@ -82,6 +92,20 @@ class BaseCircuit(object):
     @property
     def parameters(self) -> Optional[torch.Tensor]:
         return self._parameters
+
+    """
+    Zeroes the gradient vector of the parameters vector
+    Note that when computing multiple gradients, its essential to recreate the expectation cache for each input
+    If using the same input for multiple gradients, it is nessesscary to retain the graph
+    """
+    def zero_grad(self, requires_grad: bool = True):
+        if self._parameters.grad is not None:
+            # disable gradients if no longer needed
+            if not requires_grad:
+                self._parameters.detach_()
+            self._parameters.grad.zero_()
+        # enforce that the circuit is either ready or not ready for gradients
+        self._parameters.requires_grad = requires_grad
 
     @property
     def bias(self) -> torch.Tensor:

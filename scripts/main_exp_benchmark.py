@@ -116,7 +116,7 @@ if __name__ == '__main__':
     
     lc_vtree = LC_Vtree.read(VTREE_FILE)
     with open(GLC_FILE) as circuit_file:
-        lgc = LogisticCircuit(lc_vtree, CLASSES, circuit_file=circuit_file)
+        lgc = LogisticCircuit(lc_vtree, CLASSES, circuit_file=circuit_file, requires_grad=True)
         
     print("Loading PSDD..")
     psdd_vtree = PSDD_Vtree.read(VTREE_FILE)
@@ -144,11 +144,19 @@ if __name__ == '__main__':
 
     start_t = perf_counter()
     cache = EVCache()
-    lgc._record_learned_parameters(lgc.parameters.detach().numpy(), requires_grad=True)
+    lgc.zero_grad()
     ans = circuit_expect.Expectation(psdd, lgc, cache, X)
     print(ans)
     ans.backward(torch.ones((X.shape[0], CLASSES), dtype=torch.float))
     print(lgc.parameters.grad)
+
+    # lgc.zero_grad()
+    # cache = EVCache()
+    # ans = circuit_expect.Expectation(psdd, lgc, cache, X)
+    # print(ans)
+    # ans.backward(torch.ones((X.shape[0], CLASSES), dtype=torch.float))
+    # print(lgc.parameters.grad)
+
     end_t = perf_counter()
 
     print("Time taken {}".format(end_t - start_t))
