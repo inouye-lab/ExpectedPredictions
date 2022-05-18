@@ -1,12 +1,13 @@
 from typing import Optional, Tuple, NoReturn
 
 import numpy as np
+import torch
 
 
 class DataSet(object):
     _images: np.ndarray
-    _labels: np.ndarray
-    _one_hot_labels: Optional[np.ndarray]
+    _labels: torch.Tensor
+    _one_hot_labels: Optional[torch.Tensor]
     _features: Optional[np.ndarray]
     _num_samples: int
     _num_epochs: int
@@ -14,7 +15,7 @@ class DataSet(object):
 
     def __init__(self, images: np.ndarray, labels: np.ndarray, one_hot: bool = True):
         self._images = images
-        self._labels = labels
+        self._labels = torch.from_numpy(labels)
         if one_hot:
             self._one_hot_labels = to_one_hot_encoding(labels)
         else:
@@ -29,11 +30,11 @@ class DataSet(object):
         return self._images
 
     @property
-    def labels(self) -> np.ndarray:
+    def labels(self) -> torch.Tensor:
         return self._labels
 
     @property
-    def one_hot_labels(self) -> Optional[np.ndarray]:
+    def one_hot_labels(self) -> Optional[torch.Tensor]:
         return self._one_hot_labels
 
     @property
@@ -52,7 +53,7 @@ class DataSet(object):
     def num_epochs(self) -> int:
         return self._num_epochs
 
-    def next_batch(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def next_batch(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, torch.Tensor]:
         """Return the next `batch_size` examples, features and labels from this data set."""
         assert batch_size <= self._num_samples
 
@@ -65,9 +66,9 @@ class DataSet(object):
             self._index = 0
             self._num_epochs += 1
 
-        images = self._images[self._index: self._index + batch_size]
-        labels = self._labels[self._index: self._index + batch_size]
-        features = self._features[self._index: self._index + batch_size]
+        images: np.ndarray = self._images[self._index: self._index + batch_size]
+        labels: np.ndarray = self._labels[self._index: self._index + batch_size]
+        features: np.ndarray = self._features[self._index: self._index + batch_size]
         self._index += batch_size
         return images, features, labels, to_one_hot_encoding(labels)
 
@@ -95,9 +96,9 @@ class DataSets(object):
         return self._test
 
 
-def to_one_hot_encoding(labels: np.ndarray) -> np.ndarray:
+def to_one_hot_encoding(labels: np.ndarray) -> torch.Tensor:
     num_classes = np.max(labels) + 1
-    one_hot_labels = np.zeros(shape=(len(labels), num_classes), dtype=np.float64)
+    one_hot_labels = torch.zeros(size=(len(labels), num_classes), dtype=torch.float64)
     for i in range(len(labels)):
         one_hot_labels[i][labels[i]] = 1.0
     return one_hot_labels

@@ -1,5 +1,7 @@
 from typing import Dict, List, Tuple, Optional, NoReturn
 
+import torch
+
 from pypsdd.psdd import PSddNode
 from LogisticCircuit.structure.CircuitNode import CircuitNode as LogisticCircuitNode
 
@@ -10,7 +12,7 @@ LCIndex = LogisticCircuitNode
 EVIndex = Tuple[PCIndex, LCIndex]
 MIndex = int
 MomentIndex = Tuple[MIndex, PCIndex, LCIndex]
-CacheData = np.ndarray
+CacheData = torch.Tensor
 
 
 def psdd_index(psdd: PSddNode) -> PCIndex:

@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+import torch
 
 from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
 
@@ -110,7 +111,11 @@ if __name__ == '__main__':
 
     start_t = perf_counter()
     cache = EVCache()
+    lgc._record_learned_parameters(lgc.parameters.detach().numpy(), requires_grad=True)
     ans = circuit_expect.Expectation(psdd, lgc, cache, X)
+    print(ans)
+    ans.backward(torch.ones((X.shape[0], CLASSES), dtype=torch.float))
+    print(lgc.parameters.grad)
     end_t = perf_counter()
-    4
+
     print("Time taken {}".format(end_t - start_t))

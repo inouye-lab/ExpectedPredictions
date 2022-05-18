@@ -2,10 +2,12 @@ import math
 import random
 import heapq
 
+from typing import List
+
 from .sdd import SddNode, NormalizedSddNode
 from .data import DataSet, Inst, InstMap, WeightedInstMap
 from .sdd import SddEnumerator, SddTerminalEnumerator
-from prior import Prior
+from .prior import Prior
 
 class PSddNode(NormalizedSddNode):
     """Probabilistic Sentential Decision Diagram (PSDD)
@@ -13,6 +15,7 @@ class PSddNode(NormalizedSddNode):
     See https://github.com/hahaXD/psdd for PSDD multiply."""
 
     _brute_force_limit = 10
+    theta: List[float]
 
 ########################################
 # CONSTRUCTOR + BASIC FUNCTIONS

@@ -5,6 +5,7 @@ import logging
 from time import perf_counter
 
 import numpy as np
+import torch
 from numpy.random import RandomState
 
 from ..algo.LogisticRegression import LogisticRegression
@@ -49,8 +50,8 @@ class LogisticCircuit(object):
     _terminal_nodes: List[Optional[CircuitTerminal]]
     _decision_nodes: Optional[List[OrGate]]
     _elements: Optional[List[AndGate]]
-    _parameters: Optional[np.ndarray]
-    _bias: np.ndarray
+    _parameters: Optional[torch.Tensor]
+    _bias: torch.Tensor
     _root: OrGate
 
     def __init__(self, vtree: Vtree, num_classes: int, circuit_file: Optional[TextIO] = None,
@@ -68,7 +69,7 @@ class LogisticCircuit(object):
         self._decision_nodes = None
         self._elements = None
         self._parameters = None
-        self._bias = self.rand_gen.random_sample(size=(num_classes,))
+        self._bias = torch.tensor(self.rand_gen.random_sample(size=(num_classes,)))  # TODO: copy needed?
 
         if circuit_file is None:
             self._generate_all_terminal_nodes(vtree)
@@ -83,24 +84,37 @@ class LogisticCircuit(object):
         return self._vtree
 
     @property
-    def num_parameters(self) -> int:
-        return self._parameters.size
+    def num_variables(self) -> int:
+        return self._num_variables
 
     @property
-    def parameters(self) -> Optional[np.ndarray]:
+    def root(self) -> OrGate:
+        return self._root
+
+    @property
+    def num_parameters(self) -> int:
+        # numpy return self._parameters.size
+        return self._parameters.size()
+
+    @property
+    def parameters(self) -> Optional[torch.Tensor]:
         return self._parameters
+
+    @property
+    def bias(self) -> torch.Tensor:
+        return self._bias
 
     def _generate_all_terminal_nodes(self, vtree: Vtree) -> NoReturn:
         if vtree.is_leaf():
             var_index = vtree.var
             self._terminal_nodes[var_index - 1] = CircuitTerminal(
                 self._largest_index, vtree, var_index, LITERAL_IS_TRUE,
-                self.rand_gen.random_sample(size=(self._num_classes,))
+                torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,)))  # TODO: can we directly generate using torch?
             )
             self._largest_index += 1
             self._terminal_nodes[self._num_variables + var_index - 1] = CircuitTerminal(
                 self._largest_index, vtree, var_index, LITERAL_IS_FALSE,
-                self.rand_gen.random_sample(size=(self._num_classes,))
+                torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,)))  # TODO: can we directly generate using torch?
             )
             self._largest_index += 1
         else:
@@ -118,28 +132,28 @@ class LogisticCircuit(object):
                 AndGate(
                     self._terminal_nodes[prime_variable - 1],
                     self._terminal_nodes[sub_variable - 1],
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[prime_variable - 1],
                     self._terminal_nodes[self._num_variables + sub_variable - 1],
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[self._num_variables + prime_variable - 1],
                     self._terminal_nodes[sub_variable - 1],
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[self._num_variables + prime_variable - 1],
                     self._terminal_nodes[self._num_variables + sub_variable - 1],
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
         elif left_vtree.is_leaf():
@@ -147,14 +161,14 @@ class LogisticCircuit(object):
                 AndGate(
                     self._terminal_nodes[prime_variable - 1],
                     self._new_logistic_psdd(right_vtree),
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[self._num_variables + prime_variable - 1],
                     self._new_logistic_psdd(right_vtree),
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             for element in elements:
@@ -164,14 +178,14 @@ class LogisticCircuit(object):
                 AndGate(
                     self._new_logistic_psdd(left_vtree),
                     self._terminal_nodes[sub_variable - 1],
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             elements.append(
                 AndGate(
                     self._new_logistic_psdd(left_vtree),
                     self._terminal_nodes[self._num_variables + sub_variable - 1],
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             for element in elements:
@@ -181,7 +195,7 @@ class LogisticCircuit(object):
                 AndGate(
                     self._new_logistic_psdd(left_vtree),
                     self._new_logistic_psdd(right_vtree),
-                    self.rand_gen.random_sample(size=(self._num_classes,)),
+                    torch.tensor(self.rand_gen.random_sample(size=(self._num_classes,))),
                 )
             )
             elements[0].splittable_variables = copy.deepcopy(vtree.variables)
@@ -214,21 +228,22 @@ class LogisticCircuit(object):
         self._parameters = self._bias.reshape(-1, 1)
         for terminal_node in self._terminal_nodes:
             # print(self._parameters.shape, terminal_node.parameter.reshape(-1, 1).shape)
-            self._parameters = np.concatenate(
-                (self._parameters, terminal_node.parameter.reshape(-1, 1)), axis=1)
+            self._parameters = torch.cat((self._parameters, terminal_node.parameter.reshape(-1, 1)), dim=1)
         for element in self._elements:
-            self._parameters = np.concatenate(
-                (self._parameters, element.parameter.reshape(-1, 1)), axis=1)
+            self._parameters = torch.cat((self._parameters, element.parameter.reshape(-1, 1)), dim=1)
         gc.collect()
 
-    def _record_learned_parameters(self, parameters: np.ndarray) -> NoReturn:
+    def _record_learned_parameters(self, parameters: np.array, requires_grad: bool = False) -> NoReturn:
         # hack for the binary classification case in sklearn
         # FIXME: generalize this
-        if self._num_classes == 2:
-            self._parameters = np.vstack((np.zeros(parameters.shape), copy.deepcopy(parameters)))
+        # TODO: this the right way to copy the parameters into a tensor?
+        if self._num_classes == 2 and not requires_grad:
+            self._parameters = torch.vstack((
+                torch.zeros(parameters.shape, requires_grad=requires_grad),
+                torch.tensor(parameters, requires_grad=requires_grad)
+            ))
         else:
-            self._parameters = copy.deepcopy(parameters)
-        # self.bias = self._parameters[:, 0]
+            self._parameters = torch.tensor(parameters, requires_grad=requires_grad)  # copy.deepcopy(parameters)
         self._bias = self._parameters[:, 0]
         for i in range(len(self._terminal_nodes)):
             self._terminal_nodes[i].parameter = self._parameters[:, i + 1]
@@ -260,7 +275,7 @@ class LogisticCircuit(object):
         return features.T
 
     def _select_element_and_variable_to_split(self, data: DataSet, num_splits: int) -> List[Tuple[AndGate, int]]:
-        y: np.ndarray = self.predict_prob(data.features)
+        y: torch.Tensor = self.predict_prob(data.features)
 
         delta = data.one_hot_labels - y
         element_gradients = np.stack(
@@ -365,7 +380,7 @@ class LogisticCircuit(object):
                 original_sub, variable, current_depth, max_depth)
         if copied_prime is not None and copied_sub is not None:
             copied_element = AndGate(copied_prime, copied_sub,
-                                     copy.deepcopy(original_element.parameter))
+                                     original_element.parameter.clone()) # copy.deepcopy(original_element.parameter))
             copied_element.splittable_variables = copy.deepcopy(
                 original_element.splittable_variables)
         else:
@@ -443,22 +458,23 @@ class LogisticCircuit(object):
                 copied_element = AndGate(
                     self._deep_copy_node(element.prime, variable, current_depth, max_depth),
                     element.sub,
-                    copy.deepcopy(element.parameter),
+                    element.parameter.clone(),  # copy.deepcopy(element.parameter),
                 )
             elif variable in element.sub.vtree.variables:
                 copied_element = AndGate(
                     element.prime,
                     self._deep_copy_node(element.sub, variable, current_depth, max_depth),
-                    copy.deepcopy(element.parameter),
+                    element.parameter.clone(),  # copy.deepcopy(element.parameter),
                 )
             else:
                 copied_element = AndGate(element.prime, element.sub,
-                                         copy.deepcopy(element.parameter))
+                                         element.parameter.clone(),  # copy.deepcopy(element.parameter)
+                                         )
         else:
             copied_element = AndGate(
                 self._deep_copy_node(element.prime, variable, current_depth, max_depth),
                 self._deep_copy_node(element.sub, variable, current_depth, max_depth),
-                copy.deepcopy(element.parameter),
+                element.parameter.clone(),  # copy.deepcopy(element.parameter),
             )
         copied_element.splittable_variables = copy.deepcopy(element.splittable_variables)
         return copied_element
@@ -466,19 +482,20 @@ class LogisticCircuit(object):
     def calculate_accuracy(self, data: DataSet) -> float:
         """Calculate accuracy given the learned parameters on the provided data."""
         y = self.predict(data.features)
-        accuracy = np.sum(y == data.labels) / data.num_samples
-        return accuracy
+        accuracy = torch.div(torch.sum(y.eq(data.labels)), data.num_samples)
+        return accuracy.item()
 
-    def predict(self, features: np.ndarray) -> np.ndarray:
+    def predict(self, features: np.ndarray) -> torch.Tensor:
         y = self.predict_prob(features)
-        return np.argmax(y, axis=1)
+        return torch.argmax(y, dim=1)
 
-    def predict_prob(self, features: np.ndarray) -> np.ndarray:
+    def predict_prob(self, features: np.ndarray) -> torch.Tensor:
         """Predict the given images by providing their corresponding features."""
-        y = 1.0 / (1.0 + np.exp(-np.dot(features, self._parameters.T)))
+        # For some reason tensor + 1 is a float in pycharm, but torch.add resolves the correct type hint
+        y: torch.Tensor = 1.0 / torch.exp(-torch.mm(torch.from_numpy(features), self._parameters.T)).add(1)
         print(y.shape[0])
         if y.shape[1] == 1:
-            ans = np.zeros((y.shape[0], 2), dtype="float")
+            ans = torch.zeros((y.shape[0], 2), dtype=torch.float)
             ans[:, 1] = y[:, 0]
             ans[:, 0] = 1.0 - y[:, 0]
 
@@ -498,24 +515,23 @@ class LogisticCircuit(object):
         #     C=C,
         #     warm_start=True,
         #     tol=1e-5,
-        #     coef_=self._parameters,
+        #     coef_=self._parameters.numpy(),
         #     n_jobs=num_cores,
         #     random_state=rand_gen
         # )
         model = VBLogisticRegression(
-            #solver="saga",
             fit_intercept=False,
             n_iter=num_iterations,
             #C=C,
             tol=1e-5,
             n_jobs=num_cores,
-            coef=self.parameters
+            coef=self.parameters.numpy()
         )
         print("About to fit model")
-        model.fit(data.features, data.labels)
-        gc.collect()
         print("Covariance:", np.sum(model.sigma_), np.shape(model.sigma_))
+        model.fit(data.features, data.labels.numpy())
         self._record_learned_parameters(model.coef_)
+        gc.collect()
 
     def change_structure(self, data: DataSet, depth: int, num_splits: int) -> NoReturn:
         splits: List[Tuple[AndGate, int]] = self._select_element_and_variable_to_split(data, num_splits)
@@ -568,13 +584,13 @@ class LogisticCircuit(object):
             if positive_literal:
                 terminal_nodes[index] = (
                     CircuitTerminal(index, vtree_nodes[vtree_index], var, LITERAL_IS_TRUE,
-                                    np.array(parameters, dtype=np.float64)),
+                                    torch.tensor(parameters, dtype=torch.float64)),
                     {var}
                 )
             else:
                 terminal_nodes[index] = (
                     CircuitTerminal(index, vtree_nodes[vtree_index], var, LITERAL_IS_FALSE,
-                                    np.array(parameters, dtype=np.float64)),
+                                    torch.tensor(parameters, dtype=torch.float64)),
                     {-var}
                 )
             self._largest_index = max(self._largest_index, index)
@@ -613,7 +629,7 @@ class LogisticCircuit(object):
                 for j in range(self._num_classes):
                     parameters.append(
                         float(line_as_list[i * (self._num_classes + 2) + 6 + j].strip(")")))
-                elements.append(AndGate(nodes[prime_index][0], nodes[sub_index][0], np.array(parameters, dtype=np.float64)))
+                elements.append(AndGate(nodes[prime_index][0], nodes[sub_index][0], torch.tensor(parameters, dtype=torch.float64)))
                 elements[-1].splittable_variables = splittable_variables
             root = OrGate(index, vtree_nodes[vtree_index], elements)
             nodes[index] = (root, variables)
@@ -625,8 +641,8 @@ class LogisticCircuit(object):
             raise ValueError("Circuit must have at least one decision node to represent the root node")
 
         if line[0] != "B":
-            raise ValueError("The last line in a circuit file must record the bias parameters.")
-        self._bias = np.array([float(x) for x in line.strip().split(" ")[1:]], dtype=np.float64)
+            raise ValueError("After decision nodes in a circuit must record the bias parameters.")
+        self._bias = torch.tensor([float(x) for x in line.strip().split(" ")[1:]], dtype=torch.float64)
 
         del nodes
         gc.collect()

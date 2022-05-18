@@ -6,6 +6,7 @@ from time import perf_counter
 from typing import Optional, TextIO, List, NoReturn, Tuple, Union, Dict, Set
 
 import numpy as np
+import torch
 from numpy.random import RandomState
 from sklearn.metrics import mean_squared_error
 
@@ -48,11 +49,12 @@ class RegressionCircuit(object):
     _terminal_nodes: List[Optional[CircuitTerminal]]
     _decision_nodes: Optional[List[OrGate]]
     _elements: Optional[List[AndGate]]
-    _parameters: Optional[np.ndarray]
-    _bias: np.ndarray
+    _parameters: Optional[torch.Tensor]
+    _bias: torch.Tensor
     _root: OrGate
 
-    def __init__(self, vtree: Vtree, circuit_file: Optional[TextIO] = None, rand_gen: Optional[RandomState] = None):
+    def __init__(self, vtree: Vtree, circuit_file: Optional[TextIO] = None,
+                 rand_gen: Optional[RandomState] = None):
 
         self._vtree = vtree
         self._num_classes = 1
@@ -67,7 +69,7 @@ class RegressionCircuit(object):
         self._decision_nodes = None
         self._elements = None
         self._parameters = None
-        self._bias = self.rand_gen.random_sample(size=1)
+        self._bias = torch.tensor(self.rand_gen.random_sample(size=1))
 
         if circuit_file is None:
             self._generate_all_terminal_nodes(vtree)
@@ -82,24 +84,37 @@ class RegressionCircuit(object):
         return self._vtree
 
     @property
-    def num_parameters(self) -> int:
-        return self._parameters.size
+    def num_variables(self) -> int:
+        return self._num_variables
 
     @property
-    def parameters(self) -> Optional[np.ndarray]:
+    def root(self) -> OrGate:
+        return self._root
+
+    @property
+    def num_parameters(self) -> int:
+        # numpy return self._parameters.size
+        return self._parameters.size()
+
+    @property
+    def parameters(self) -> Optional[torch.Tensor]:
         return self._parameters
+
+    @property
+    def bias(self) -> torch.Tensor:
+        return self._bias
 
     def _generate_all_terminal_nodes(self, vtree: Vtree) -> NoReturn:
         if vtree.is_leaf():
             var_index = vtree.var
             self._terminal_nodes[var_index - 1] = CircuitTerminal(
                 self._largest_index, vtree, var_index, LITERAL_IS_TRUE,
-                self.rand_gen.random_sample(size=1)
+                torch.tensor(self.rand_gen.random_sample(size=1))
             )
             self._largest_index += 1
             self._terminal_nodes[self._num_variables + var_index - 1] = CircuitTerminal(
                 self._largest_index, vtree, var_index, LITERAL_IS_FALSE,
-                self.rand_gen.random_sample(size=1)
+                torch.tensor(self.rand_gen.random_sample(size=1))
             )
             self._largest_index += 1
         else:
@@ -118,28 +133,28 @@ class RegressionCircuit(object):
                 AndGate(
                     self._terminal_nodes[prime_variable - 1],
                     self._terminal_nodes[sub_variable - 1],
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[prime_variable - 1],
                     self._terminal_nodes[self._num_variables + sub_variable - 1],
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[self._num_variables + prime_variable - 1],
                     self._terminal_nodes[sub_variable - 1],
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[self._num_variables + prime_variable - 1],
                     self._terminal_nodes[self._num_variables + sub_variable - 1],
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
         elif left_vtree.is_leaf():
@@ -147,14 +162,14 @@ class RegressionCircuit(object):
                 AndGate(
                     self._terminal_nodes[prime_variable - 1],
                     self._new_regression_psdd(right_vtree),
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             elements.append(
                 AndGate(
                     self._terminal_nodes[self._num_variables + prime_variable - 1],
                     self._new_regression_psdd(right_vtree),
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             for element in elements:
@@ -164,14 +179,14 @@ class RegressionCircuit(object):
                 AndGate(
                     self._new_regression_psdd(left_vtree),
                     self._terminal_nodes[sub_variable - 1],
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             elements.append(
                 AndGate(
                     self._new_regression_psdd(left_vtree),
                     self._terminal_nodes[self._num_variables + sub_variable - 1],
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             for element in elements:
@@ -181,7 +196,7 @@ class RegressionCircuit(object):
                 AndGate(
                     self._new_regression_psdd(left_vtree),
                     self._new_regression_psdd(right_vtree),
-                    self.rand_gen.random_sample(size=1)
+                    torch.tensor(self.rand_gen.random_sample(size=1))
                 )
             )
             elements[0].splittable_variables = copy.deepcopy(vtree.variables)
@@ -215,16 +230,15 @@ class RegressionCircuit(object):
         self._parameters = self._bias.reshape(-1, 1)
         for terminal_node in self._terminal_nodes:
             # print(self._parameters.shape, terminal_node.parameter.reshape(-1, 1).shape)
-            self._parameters = np.concatenate(
-                (self._parameters, terminal_node.parameter.reshape(-1, 1)), axis=1)
+            self._parameters = torch.cat((self._parameters, terminal_node.parameter.reshape(-1, 1)), dim=1)
         for element in self._elements:
-            self._parameters = np.concatenate(
-                (self._parameters, element.parameter.reshape(-1, 1)), axis=1)
+            self._parameters = torch.cat((self._parameters, element.parameter.reshape(-1, 1)), dim=1)
         gc.collect()
 
     # Same as LogisticCircuit except the parameter copying
-    def _record_learned_parameters(self, parameters: np.ndarray) -> NoReturn:
-        self._parameters = copy.deepcopy(parameters).reshape(1, -1)
+    def _record_learned_parameters(self, parameters: np.ndarray, requires_grad: bool = False) -> NoReturn:
+        # TODO: reshape required?
+        self._parameters = torch.tensor(parameters, requires_grad=requires_grad).reshape(1, -1)
         # print("todo fix the _record_learned_parameters")
 
         print('PARAMS', self._parameters.shape)
@@ -238,7 +252,7 @@ class RegressionCircuit(object):
 
     # Identical to LogisticCircuit
     def calculate_features(self, images: np.ndarray) -> np.ndarray:
-        num_images = images.shape[0]
+        num_images: int = images.shape[0]
         for terminal_node in self._terminal_nodes:
             terminal_node.calculate_prob(images)
         for decision_node in reversed(self._decision_nodes):
@@ -264,11 +278,12 @@ class RegressionCircuit(object):
     def _select_element_and_variable_to_split(self, data: DataSet, num_splits: int,
                                               alpha: float, min_candidate_list: int = 5000) -> List[Tuple[AndGate, int]]:
         # y = self.predict_prob(data.features)
-        y: np.ndarray = self.predict(data.features)
+        y: torch.Tensor = self.predict(data.features)
 
-        delta = data.labels.reshape(-1, 1) - y
+        delta: np.ndarray = (data.labels.reshape(-1, 1) - y).numpy()
         # element_gradients = - 2 * np.dot(data.features.T,  delta) + (2 * alpha * self.parameters).T
-        element_gradients = (-2 * (delta.reshape(-1, 1) * data.features + (2 * alpha * self.parameters))[:, 2 * self._num_variables + 1:])
+        # TODO: we are using torch elsewhere for gradients, feel like here might as well use it later
+        element_gradients = (-2 * (delta.reshape(-1, 1) * data.features + (2 * alpha * self.parameters.numpy()))[:, 2 * self._num_variables + 1:])
         # logging.info(
         #     f'e g shape {len(element_gradients)} delta {delta.shape} {data.features.shape}')
         element_gradient_variance = np.var(element_gradients, axis=0)
@@ -470,22 +485,23 @@ class RegressionCircuit(object):
                 copied_element = AndGate(
                     self._deep_copy_node(element.prime, variable, current_depth, max_depth),
                     element.sub,
-                    copy.deepcopy(element.parameter),
+                    element.parameter.clone(),  # copy.deepcopy(element.parameter),
                 )
             elif variable in element.sub.vtree.variables:
                 copied_element = AndGate(
                     element.prime,
                     self._deep_copy_node(element.sub, variable, current_depth, max_depth),
-                    copy.deepcopy(element.parameter),
+                    element.parameter.clone(),  # copy.deepcopy(element.parameter),
                 )
             else:
                 copied_element = AndGate(element.prime, element.sub,
-                                         copy.deepcopy(element.parameter))
+                                         element.parameter.clone(),  # copy.deepcopy(element.parameter)
+                                         )
         else:
             copied_element = AndGate(
                 self._deep_copy_node(element.prime, variable, current_depth, max_depth),
                 self._deep_copy_node(element.sub, variable, current_depth, max_depth),
-                copy.deepcopy(element.parameter),
+                element.parameter.clone(),  # copy.deepcopy(element.parameter),
             )
         copied_element.splittable_variables = copy.deepcopy(element.splittable_variables)
         return copied_element
@@ -506,8 +522,8 @@ class RegressionCircuit(object):
     #     y = self.predict_prob(features)
     #     return np.argmax(y, axis=1)
 
-    def predict(self, features: np.ndarray) -> np.ndarray:
-        return np.dot(features, self._parameters.T)
+    def predict(self, features: np.ndarray) -> torch.Tensor:
+        return torch.mm(torch.from_numpy(features), self._parameters.T)
 
     # def predict_prob(self, features):
     #     """Predict the given images by providing their corresponding features."""
@@ -528,7 +544,7 @@ class RegressionCircuit(object):
             max_iter=num_iterations,
             tol=tol,
             solver=solver,
-            # coef_=self._parameters,
+            # coef_=self._parameters.numpy(),
             random_state=rand_gen,
         )
 
@@ -536,8 +552,10 @@ class RegressionCircuit(object):
         #                            # multi_class='ovr',
         #                            max_iter=num_iterations, C=10.0, warm_start=True, tol=1e-5,
         #                            coef_=self._parameters, n_jobs=num_cores)
-        model.fit(data.features, data.labels)
+        print("About to fit model")
+        model.fit(data.features, data.labels.numpy())
         # print('PARAMS', self._parameters.shape, model.coef_.shape)
+
         self._record_learned_parameters(model.coef_)
         gc.collect()
 
@@ -572,10 +590,10 @@ class RegressionCircuit(object):
 
         # serialize the vtree
         vtree_nodes: Dict[int, Vtree] = dict()
-        unvisited_vtree_nodes = deque()
+        unvisited_vtree_nodes: deque[Vtree] = deque()
         unvisited_vtree_nodes.append(self._vtree)
         while len(unvisited_vtree_nodes):
-            node = unvisited_vtree_nodes.popleft()
+            node: Vtree = unvisited_vtree_nodes.popleft()
             vtree_nodes[node.index] = node
             if not node.is_leaf():
                 unvisited_vtree_nodes.append(node.left)
@@ -595,13 +613,13 @@ class RegressionCircuit(object):
             if positive_literal:
                 terminal_nodes[index] = (
                     CircuitTerminal(index, vtree_nodes[vtree_index], var, LITERAL_IS_TRUE,
-                                    np.array(parameters, dtype=np.float64)),
+                                    torch.tensor(parameters, dtype=torch.float64)),
                     {var}
                 )
             else:
                 terminal_nodes[index] = (
                     CircuitTerminal(index, vtree_nodes[vtree_index], var, LITERAL_IS_FALSE,
-                                    np.array(parameters, dtype=np.float64)),
+                                    torch.tensor(parameters, dtype=torch.float64)),
                     {-var})
             self._largest_index = max(self._largest_index, index)
             line = f.readline()
@@ -643,7 +661,7 @@ class RegressionCircuit(object):
                 #     parameters.append(
                 #         float(line_as_list[i * (self._num_classes + 2) + 6 + j].strip(')')))
                 parameters.append(float(line_as_list[i * (1 + 2) + 6].strip(")")))
-                elements.append(AndGate(nodes[prime_index][0], nodes[sub_index][0], np.array(parameters, dtype=np.float64)))
+                elements.append(AndGate(nodes[prime_index][0], nodes[sub_index][0], torch.tensor(parameters, dtype=torch.float64)))
                 elements[-1].splittable_variables = splittable_variables
             root = OrGate(index, vtree_nodes[vtree_index], elements)
             nodes[index] = (root, variables)
@@ -656,7 +674,7 @@ class RegressionCircuit(object):
 
         if line[0] != "B":
             raise ValueError("The last line in a circuit file must record the bias parameters.")
-        self._bias = np.array([float(x) for x in line.strip().split(" ")[1:]], dtype=np.float64)
+        self._bias = torch.tensor([float(x) for x in line.strip().split(" ")[1:]], dtype=torch.float64)
 
         del nodes
         gc.collect()

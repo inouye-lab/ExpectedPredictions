@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+
 from .Vtree import Vtree
 from typing import List, NoReturn, Optional, TextIO, TYPE_CHECKING
 
@@ -133,9 +135,9 @@ class CircuitTerminal(CircuitNode):
 
     _var_index: int
     _var_value: int
-    _parameter: np.ndarray
+    _parameter: torch.Tensor
 
-    def __init__(self, index: int, vtree: Vtree, var_index: int, var_value: int, parameter: np.ndarray = None):
+    def __init__(self, index: int, vtree: Vtree, var_index: int, var_value: int, parameter: torch.Tensor = None):
         super().__init__(index, vtree)
         self._var_index = var_index
         self._var_value = var_value
@@ -164,11 +166,11 @@ class CircuitTerminal(CircuitNode):
         self._var_value = value
 
     @property
-    def parameter(self) -> np.ndarray:
+    def parameter(self) -> torch.Tensor:
         return self._parameter
 
     @parameter.setter
-    def parameter(self, value: np.ndarray) -> NoReturn:
+    def parameter(self, value: torch.Tensor) -> NoReturn:
         self._parameter = value
 
     def calculate_prob(self, samples: np.array) -> NoReturn:

@@ -1,6 +1,7 @@
 from typing import Union, Optional, Set, NoReturn
 
 import numpy as np
+import torch
 
 from .CircuitNode import CircuitNode, OrGate, CircuitTerminal
 
@@ -19,13 +20,13 @@ class AndGate(CircuitNode):
 
     _prime: Optional[AndChildNode]
     _sub: Optional[AndChildNode]
-    _parameter: Optional[np.ndarray]
+    _parameter: Optional[torch.Tensor]
     _splittable_variables: Set[int]
     _parent: Optional[OrGate]
     _flag: bool
 
     def __init__(self, prime: Optional[AndChildNode], sub: Optional[AndChildNode],
-                 parameter: Optional[np.ndarray] = None):
+                 parameter: Optional[torch.Tensor] = None):
         # TODO: super call
         # super().__init__(index = None, vtree = None)
         self._prime = prime
@@ -85,11 +86,11 @@ class AndGate(CircuitNode):
         self._prob = self._prime.prob + self._sub.prob
 
     @property
-    def parameter(self) -> Optional[np.ndarray]:
+    def parameter(self) -> Optional[torch.Tensor]:
         return self._parameter
 
     @parameter.setter
-    def parameter(self, value: Optional[np.ndarray]):
+    def parameter(self, value: Optional[torch.Tensor]):
         self._parameter = value
 
     @property
