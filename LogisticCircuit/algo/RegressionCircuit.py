@@ -107,11 +107,10 @@ class RegressionCircuit(BaseCircuit):
 
                     # left_gradient = (data.one_hot_labels - y) * left_feature.reshape((-1, 1))
                     # right_gradient = (data.one_hot_labels - y) * right_feature.reshape((-1, 1))
-                    left_gradient = -2 * np.dot(left_feature.reshape((-1, 1)).T,
-                                                delta) + (2 * alpha * self.parameters).T
+                    left_gradient = -2 * np.dot(left_feature.reshape((-1, 1)).T, delta) + (2 * alpha * self.parameters.numpy()).T
                     right_gradient = -2 * \
                         np.dot(right_feature.reshape((-1, 1)).T, delta) + \
-                        (2 * alpha * self.parameters).T
+                        (2 * alpha * self.parameters.numpy()).T
 
                     # logging.info(f'LG {left_gradient.shape} RG {right_gradient.shape}')
                     w = np.sum(data.images[:, variable - 1]) / data.num_samples
