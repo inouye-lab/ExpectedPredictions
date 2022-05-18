@@ -1,5 +1,6 @@
 import copy
 import gc
+import math
 from collections import deque
 import logging
 from time import perf_counter
@@ -34,6 +35,7 @@ c T id-of-true-literal-node id-of-vtree variable parameters
 c F id-of-false-literal-node id-of-vtree variable parameters
 c D id-of-or-gate id-of-vtree number-of-elements (id-of-prime id-of-sub parameters)s
 c B bias-parameters
+c V covariances
 c
 """
 
@@ -51,6 +53,7 @@ class RegressionCircuit(object):
     _decision_nodes: Optional[List[OrGate]]
     _elements: Optional[List[AndGate]]
     _parameters: Optional[torch.Tensor]
+    _covariance: Optional[List[np.ndarray]]
     _bias: torch.Tensor
     _root: OrGate
 
@@ -70,6 +73,7 @@ class RegressionCircuit(object):
         self._decision_nodes = None
         self._elements = None
         self._parameters = None
+        self._covariance = None
         self._bias = torch.tensor(self.rand_gen.random_sample(size=1))
 
         if circuit_file is None:
@@ -576,8 +580,10 @@ class RegressionCircuit(object):
 
         print("About to fit model")
         model.fit(data.features, data.labels.numpy())
+        # bayesian variants store the covariance
         if solver in ('bayesian-ridge', 'bayesian-ard'):
             print("Covariance:", np.sum(model.sigma_), np.shape(model.sigma_))
+            self._covariance = [model.sigma_]
         # print('PARAMS', self._parameters.shape, model.coef_.shape)
 
         self._record_learned_parameters(model.coef_)
@@ -604,6 +610,12 @@ class RegressionCircuit(object):
         for parameter in self._bias:
             f.write(f" {parameter}")
         f.write("\n")
+        if self._covariance is not None:
+            for covMatrix in self._covariance:
+                f.write("V")
+                for cov in covMatrix.flatten():
+                    f.write(f" {cov}")
+                f.write("\n")
 
     # Bit different, should compare if considering merging
     def load(self, f: TextIO) -> OrGate:
@@ -699,6 +711,21 @@ class RegressionCircuit(object):
         if line[0] != "B":
             raise ValueError("The last line in a circuit file must record the bias parameters.")
         self._bias = torch.tensor([float(x) for x in line.strip().split(" ")[1:]], dtype=torch.float64)
+
+        # the parameters vector will be reconstructed after loading, but the covariance will need to be read
+        line = f.readline()
+        covariances: List[np.ndarray] = []
+        while line and line[0] == "V":
+            vector = np.array([float(x) for x in line.strip().split(" ")[1:]], dtype=np.float64)
+            matrixSize: Union[int, float] = math.sqrt(vector.size)
+            if not matrixSize.is_integer():
+                print("Error: covariance matrix must be square")
+                # raise ValueError("Covariance matrix must be square"
+            else:
+                matrixSize = int(matrixSize)
+                covariances.append(vector.reshape((matrixSize, matrixSize)))
+            line = f.readline()
+        self._covariance = covariances
 
         del nodes
         gc.collect()
