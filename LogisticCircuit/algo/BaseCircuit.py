@@ -250,17 +250,36 @@ class BaseCircuit(object):
             self._parameters = torch.cat((self._parameters, element.parameter.reshape(-1, 1)), dim=1)
         gc.collect()
 
-    def set_node_parameters(self, parameters: torch.Tensor):
+    def set_node_parameters(self, parameters: torch.Tensor, set_circuit: bool = False,
+                            reset_covariance: bool = False) -> NoReturn:
         """
         Sets the parameters of the nodes from the given parameter tensor.
-        Intentionally does not update self.parameters to allow more samples
+        Intentionally does not update self.parameters to allow more samples.
+
+        @param parameters:       New parameters to set
+        @param set_circuit:      If true, sets the parameters on the circuit itself
+        @param reset_covariance: If true, resets the covariance on the circuit
         """
+        if set_circuit:
+            self._parameters = parameters.clone()
+            parameters = self._parameters
         self._bias = parameters[:, 0]
         for i in range(len(self._terminal_nodes)):
             self._terminal_nodes[i].parameter = parameters[:, i + 1]
         for i in range(len(self._elements)):
             self._elements[i].parameter = parameters[:, i + 1 + 2 * self._num_variables]
+        if reset_covariance:
+            self._covariance = []
         gc.collect()
+
+    def randomize_node_parameters(self) -> NoReturn:
+        """Randomizes all the parameters on the circuit, used for retraining to minimize bias"""
+        self._bias = torch.tensor(self.rand_gen.random_sample(size=self._parameter_size()))
+        for i in range(len(self._terminal_nodes)):
+            self._terminal_nodes[i].parameter = torch.tensor(self.rand_gen.random_sample(size=self._parameter_size()))
+        for i in range(len(self._elements)):
+            self._elements[i].parameter = torch.tensor(self.rand_gen.random_sample(size=self._parameter_size()))
+        self._serialize()
 
     def calculate_features(self, images: np.ndarray) -> np.ndarray:
         num_images: int = images.shape[0]
