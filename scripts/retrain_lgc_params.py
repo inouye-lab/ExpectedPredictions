@@ -120,7 +120,7 @@ if __name__ == '__main__':
     totalSamples = x_train.shape[0]
     for i, percent in enumerate(args.data_percents):
         print("\nRestoring parameters...")
-        lgc.set_node_parameters(originalParams.clone())
+        lgc.set_node_parameters(originalParams.clone(), set_circuit=True, reset_covariance=True)
 
         print("Selecting samples...")
         sampleIndexes = randState.choice(totalSamples, size=math.floor(totalSamples * percent), replace=False)
