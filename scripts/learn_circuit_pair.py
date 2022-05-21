@@ -28,7 +28,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from LogisticCircuit.structure.Vtree import generate_random_vtree
+from LogisticCircuit.structure.Vtree import generate_random_vtree, Vtree as LC_Vtree
 from LogisticCircuit.algo.LogisticCircuit import learn_logistic_circuit
 from LogisticCircuit.algo.LogisticRegression import LogisticRegression
 from LogisticCircuit.util.DataSet import DataSet
@@ -183,6 +183,7 @@ if __name__ == '__main__':
         logging.info(f'Generated random balanced vtree and saved to {vtree_path}')
     else:
         vtree_path = args.vtree
+        v = LC_Vtree.read(vtree_path)
         logging.info(f'Loaded vtree from {vtree_path}')
 
     #
