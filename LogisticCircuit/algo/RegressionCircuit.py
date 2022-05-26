@@ -219,7 +219,9 @@ class RegressionCircuit(BaseCircuit):
         model.fit(data.features, data.labels.numpy())
         # bayesian variants store the covariance
         if solver in ('bayesian-ridge', 'bayesian-ard'):
-            print("Covariance:", np.sum(model.sigma_), np.shape(model.sigma_))
+            w, v = np.linalg.eig(model.sigma_)
+            print("Covariance:", np.sum(w), np.shape(model.sigma_))
+            # TODO: sum the eigen values instead to get better numbers
             self._covariance = [model.sigma_]
         # print('PARAMS', self._parameters.shape, model.coef_.shape)
 
