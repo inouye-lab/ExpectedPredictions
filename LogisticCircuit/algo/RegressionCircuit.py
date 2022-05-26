@@ -13,6 +13,7 @@ from sklearn.metrics import mean_squared_error
 
 # from .Ridge import Ridge
 from sklearn.linear_model import Ridge
+from sklearn.model_selection import GridSearchCV
 
 from .BaseCircuit import BaseCircuit
 from .BayesianRegression import BayesianRidge, ARDRegression
@@ -173,33 +174,33 @@ class RegressionCircuit(BaseCircuit):
     #     return y
 
     def learn_parameters(self, data: DataSet, num_iterations: int, num_cores: int = -1,
-                         alpha: float = 1.0, alpha_1: float = 1e-6, alpha_2: float = 1e-6,
-                         tol: float = 0.001, solver: str = "auto",
-                         rand_gen: Union[int, RandomState, None] = None) -> NoReturn:
+                         solver: str = "auto", alpha: float = 1.0,
+                         rand_gen: Union[int, RandomState, None] = None,
+                         params: Dict = None, cv_params: Dict = None) -> NoReturn:
         """Logistic Psdd's parameter learning is reduced to logistic regression.
         We use mini-batch SGD to optimize the parameters."""
+        if params is None:
+            params = {}
 
         if solver == 'bayesian-ridge':
             model = BayesianRidge(
-                alpha_1=alpha_1, alpha_2=alpha_2,
                 fit_intercept=False,
                 normalize=False,
                 copy_X=True,
-                tol=tol,
                 n_iter=num_iterations,
                 # coef=self._parameters.flatten().numpy(),
                 # random_state=rand_gen, TODO?
+                **params
             )
         elif solver == 'bayesian-ard':
             model = ARDRegression(
-                alpha_1=alpha_1, alpha_2=alpha_2,
                 fit_intercept=False,
                 normalize=False,
                 copy_X=True,
-                tol=tol,
                 n_iter=num_iterations,
                 # coef_init=self._parameters.flatten().numpy(),
                 # random_state=rand_gen, TODO?
+                **params
             )
         # default to ridge and pass along solver
         else:
@@ -209,19 +210,29 @@ class RegressionCircuit(BaseCircuit):
                 normalize=False,
                 copy_X=True,
                 max_iter=num_iterations,
-                tol=tol,
                 solver=solver,
                 # coef_=self._parameters,
                 random_state=rand_gen,
+                **params
             )
+
+        # grid search if given grid search params
+        if cv_params is not None:
+            model = GridSearchCV(model, cv_params, n_jobs=num_cores)
 
         print("About to fit model")
         model.fit(data.features, data.labels.numpy())
+
+        # extract best model from grid search
+        if cv_params is not None:
+            print("Best params: ", model.best_params_)
+            model = model.best_estimator_
+
         # bayesian variants store the covariance
         if solver in ('bayesian-ridge', 'bayesian-ard'):
             w, v = np.linalg.eig(model.sigma_)
+            print("Score:", model.score(data.features, data.labels.numpy()))
             print("Covariance:", np.sum(w), np.shape(model.sigma_))
-            # TODO: sum the eigen values instead to get better numbers
             self._covariance = [model.sigma_]
         # print('PARAMS', self._parameters.shape, model.coef_.shape)
 

@@ -158,7 +158,7 @@ class BayesianRidge(RegressorMixin, LinearModel):
     def __init__(self, *, n_iter=300, tol=1.e-3, alpha_1=1.e-6, alpha_2=1.e-6,
                  lambda_1=1.e-6, lambda_2=1.e-6, alpha_init=None,
                  lambda_init=None, compute_score=False, fit_intercept=True,
-                 normalize=False, copy_X=True, verbose=False, coef=None):
+                 normalize=False, copy_X=True, verbose=False, coef_init=None, scoreLL=False):
         self.n_iter = n_iter
         self.tol = tol
         self.alpha_1 = alpha_1
@@ -172,7 +172,8 @@ class BayesianRidge(RegressorMixin, LinearModel):
         self.normalize = normalize
         self.copy_X = copy_X
         self.verbose = verbose
-        self.coef_init = coef
+        self.coef_init = coef_init
+        self.scoreLL = scoreLL
 
     def fit(self, X, y, sample_weight=None):
         """Fit the model
@@ -387,6 +388,23 @@ class BayesianRidge(RegressorMixin, LinearModel):
                         n_samples * log(2 * np.pi))
 
         return score
+    
+    def score(self, X, y, sample_weight=None):
+        if self.scoreLL:
+            # TODO: do I need to preprocess and validate the data?
+            if sample_weight is not None:
+                # Sample weight can be implemented via a simple rescaling.
+                X, y = _rescale_data(X, y, sample_weight)
+
+            n_samples, n_features = X.shape
+            S = linalg.svd(X, full_matrices=False, compute_uv=False)
+            eigen_vals_ = S ** 2
+            rmse_ = np.sum((y - np.dot(X, self.coef_)) ** 2)
+            return self._log_marginal_likelihood(
+                n_samples, n_features, eigen_vals_,
+                self.alpha_, self.lambda_, self.coef_, rmse_) / n_samples
+        else:
+            return super(BayesianRidge, self).score(X, y, sample_weight)
 
 
 ###############################################################################

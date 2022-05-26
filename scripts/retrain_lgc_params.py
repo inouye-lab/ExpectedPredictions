@@ -51,6 +51,8 @@ if __name__ == '__main__':
                         help="Method used to compute the parameters for the circuit")
     parser.add_argument("--keep_params",  action='store_true',
                         help="If set, does not discard the parameters of the circuit before training. By default the original parameters are discarded")
+    parser.add_argument("--use_valid",  action='store_true',
+                        help="If set, merges the validation data into the training data for parameters")
     parser.add_argument("--n-iter-pl", type=int, default=15,
                         help="Number of iterations of parameter learning to run")
 
@@ -98,6 +100,13 @@ if __name__ == '__main__':
     valid_data = DataSet(x_valid, y_valid, one_hot)
     test_data = DataSet(x_test, y_test, one_hot)
 
+    combined_data = full_train_data
+    x_combined = x_train
+    y_combined = y_train
+    if args.use_valid:
+        x_combined = np.concatenate((x_train, x_valid), axis=0)
+        y_combined = np.concatenate((y_train, y_valid), axis=0)
+
     full_train_data.features = lgc.calculate_features(full_train_data.images)
     valid_data.features = lgc.calculate_features(valid_data.images)
     test_data.features = lgc.calculate_features(test_data.images)
@@ -117,22 +126,31 @@ if __name__ == '__main__':
     originalParams = lgc.parameters.clone()
 
     # train for each selected percent
-    totalSamples = x_train.shape[0]
+    totalSamples = x_combined.shape[0]
     for i, percent in enumerate(args.data_percents):
         print("\nRestoring parameters...")
         lgc.set_node_parameters(originalParams.clone(), set_circuit=True, reset_covariance=True)
 
         print("Selecting samples...")
         sampleIndexes = randState.choice(totalSamples, size=math.floor(totalSamples * percent), replace=False)
-        x = x_train[sampleIndexes, :]
-        y = y_train[sampleIndexes]
+        x = x_combined[sampleIndexes, :]
+        y = y_combined[sampleIndexes]
         train_data = DataSet(x, y, one_hot)
         train_data.features = lgc.calculate_features(train_data.images)
 
         print(f"Training circuit for {percent * 100} percent with {y.shape[0]} samples...")
         if args.regression:
             pl_start_t = perf_counter()
-            lgc.learn_parameters(train_data, args.n_iter_pl, rand_gen=randState, solver=args.solver)
+            lgc.learn_parameters(
+                train_data, args.n_iter_pl, rand_gen=randState, solver=args.solver,
+                params={
+                    'scoreLL': True,
+                    # 'lambda_init': 0.1
+                },
+                cv_params={
+                    'lambda_init': [0.01, 0.1, 1, 10, 100],
+                }
+            )
             pl_end_t = perf_counter()
 
             train_acc: float = lgc.calculate_error(train_data)
