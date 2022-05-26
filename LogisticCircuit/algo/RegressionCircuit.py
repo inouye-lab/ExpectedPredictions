@@ -185,9 +185,9 @@ class RegressionCircuit(BaseCircuit):
                 fit_intercept=False,
                 normalize=False,
                 copy_X=True,
-                # max_iter=num_iterations,
                 tol=tol,
-                coef=self._parameters.flatten().numpy(),
+                n_iter=num_iterations,
+                # coef=self._parameters.flatten().numpy(),
                 # random_state=rand_gen, TODO?
             )
         elif solver == 'bayesian-ard':
@@ -196,9 +196,9 @@ class RegressionCircuit(BaseCircuit):
                 fit_intercept=False,
                 normalize=False,
                 copy_X=True,
-                # max_iter=num_iterations,
                 tol=tol,
-                coef=self._parameters.flatten().numpy(),
+                n_iter=num_iterations,
+                # coef_init=self._parameters.flatten().numpy(),
                 # random_state=rand_gen, TODO?
             )
         # default to ridge and pass along solver
