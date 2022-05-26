@@ -51,9 +51,9 @@ class LogisticCircuit(BaseCircuit):
         return (self._num_classes,)
 
     def _select_element_and_variable_to_split(self, data: DataSet, num_splits: int) -> List[Tuple[AndGate, int]]:
-        y: torch.Tensor = self.predict_prob(data.features)
+        y: np.ndarray = self.predict_prob(data.features).numpy()
 
-        delta = data.one_hot_labels - y
+        delta: np.ndarray = data.one_hot_labels.numpy() - y
         element_gradients = np.stack(
             [
                 (delta[:, i].reshape(-1, 1) * data.features)[:, 2 * self._num_variables + 1:]
@@ -81,8 +81,8 @@ class LogisticCircuit(BaseCircuit):
                 # print('SPLIT', element_to_split.splittable_variables)
                 for variable in element_to_split.splittable_variables:
                     variable: int
-                    left_feature = original_feature * data.images[:, variable - 1]
-                    right_feature = original_feature - left_feature
+                    left_feature: np.ndarray = original_feature * data.images[:, variable - 1]
+                    right_feature: np.ndarray = original_feature - left_feature
 
                     # print('SUM left', np.sum(left_feature), np.sum(right_feature))
                     #
@@ -90,8 +90,8 @@ class LogisticCircuit(BaseCircuit):
                     # FIXME: this is hardcoded, disabling it for a moment
                     # if np.sum(left_feature) > 10 and np.sum(right_feature) > 10:
 
-                    left_gradient = (data.one_hot_labels - y) * left_feature.reshape((-1, 1))
-                    right_gradient = (data.one_hot_labels - y) * right_feature.reshape((-1, 1))
+                    left_gradient = (data.one_hot_labels.numpy() - y) * left_feature.reshape((-1, 1))
+                    right_gradient = (data.one_hot_labels.numpy() - y) * right_feature.reshape((-1, 1))
 
                     w = np.sum(data.images[:, variable - 1]) / data.num_samples
 
