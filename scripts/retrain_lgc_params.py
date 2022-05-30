@@ -53,6 +53,8 @@ if __name__ == '__main__':
                         help="If set, does not discard the parameters of the circuit before training. By default the original parameters are discarded")
     parser.add_argument("--use_valid",  action='store_true',
                         help="If set, merges the validation data into the training data for parameters")
+    parser.add_argument("--enforce_subsets",  action='store_true',
+                        help="If set, each percent subset of parameters will always be a subset of any larger percentage")
     parser.add_argument("--n-iter-pl", type=int, default=15,
                         help="Number of iterations of parameter learning to run")
 
@@ -127,12 +129,19 @@ if __name__ == '__main__':
 
     # train for each selected percent
     totalSamples = x_combined.shape[0]
+    indexes = None
+    if args.enforce_subsets:
+        indexes = randState.permutation(totalSamples)
     for i, percent in enumerate(args.data_percents):
         print("\nRestoring parameters...")
         lgc.set_node_parameters(originalParams.clone(), set_circuit=True, reset_covariance=True)
 
         print("Selecting samples...")
-        sampleIndexes = randState.choice(totalSamples, size=math.floor(totalSamples * percent), replace=False)
+        sampleCount = max(2, math.floor(totalSamples * percent))
+        if args.enforce_subsets:
+            sampleIndexes = indexes[0:sampleCount]
+        else:
+            sampleIndexes = randState.choice(totalSamples, size=sampleCount, replace=False)
         x = x_combined[sampleIndexes, :]
         y = y_combined[sampleIndexes]
         train_data = DataSet(x, y, one_hot)
