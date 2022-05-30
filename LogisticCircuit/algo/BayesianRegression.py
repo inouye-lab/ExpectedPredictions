@@ -17,6 +17,11 @@ from sklearn.utils.validation import _check_sample_weight
 from sklearn.utils.validation import _deprecate_positional_args
 
 
+def _gaussianLogLikelihood(x: np.ndarray, mean: np.ndarray, var: np.ndarray) -> np.ndarray:
+    """Evaluates the log likelihood for a gaussian distribution"""
+    return -0.5 * np.log(2 * np.pi * var) \
+        - 0.5 / var * ((x - mean) ** 2)
+
 ###############################################################################
 # BayesianRidge regression
 
@@ -388,21 +393,24 @@ class BayesianRidge(RegressorMixin, LinearModel):
                         n_samples * log(2 * np.pi))
 
         return score
-    
+
     def score(self, X, y, sample_weight=None):
         if self.scoreLL:
+            mean, var = self.predict(X, return_std=True)
+            return _gaussianLogLikelihood(y, mean, var).sum() / X.shape[0]
             # TODO: do I need to preprocess and validate the data?
-            if sample_weight is not None:
-                # Sample weight can be implemented via a simple rescaling.
-                X, y = _rescale_data(X, y, sample_weight)
-
-            n_samples, n_features = X.shape
-            S = linalg.svd(X, full_matrices=False, compute_uv=False)
-            eigen_vals_ = S ** 2
-            rmse_ = np.sum((y - np.dot(X, self.coef_)) ** 2)
-            return self._log_marginal_likelihood(
-                n_samples, n_features, eigen_vals_,
-                self.alpha_, self.lambda_, self.coef_, rmse_) / n_samples
+            # TODO: this does not work as the eigen values vector is the wrong size
+            # if sample_weight is not None:
+            #     # Sample weight can be implemented via a simple rescaling.
+            #     X, y = _rescale_data(X, y, sample_weight)
+            #
+            # n_samples, n_features = X.shape
+            # # S = linalg.svd(X, full_matrices=False, compute_uv=False)
+            # # eigen_vals_ = S ** 2
+            # rmse_ = np.sum((y - np.dot(X, self.coef_)) ** 2)
+            # return self._log_marginal_likelihood(
+            #     n_samples, n_features, self.eigen_vals_,
+            #     self.alpha_, self.lambda_, self.coef_, rmse_) / n_samples
         else:
             return super(BayesianRidge, self).score(X, y, sample_weight)
 
@@ -532,7 +540,7 @@ class ARDRegression(RegressorMixin, LinearModel):
     def __init__(self, *, n_iter=300, tol=1.e-3, alpha_1=1.e-6, alpha_2=1.e-6,
                  lambda_1=1.e-6, lambda_2=1.e-6, compute_score=False,
                  threshold_lambda=1.e+4, fit_intercept=True, normalize=False,
-                 copy_X=True, verbose=False, coef=None):
+                 copy_X=True, verbose=False, coef_init=None, scoreLL=False):
         self.n_iter = n_iter
         self.tol = tol
         self.fit_intercept = fit_intercept
@@ -545,7 +553,8 @@ class ARDRegression(RegressorMixin, LinearModel):
         self.threshold_lambda = threshold_lambda
         self.copy_X = copy_X
         self.verbose = verbose
-        self.coef_init = coef
+        self.coef_init = coef_init
+        self.scoreLL = scoreLL
 
     def fit(self, X, y):
         """Fit the ARDRegression model according to the given training data
@@ -719,3 +728,10 @@ class ARDRegression(RegressorMixin, LinearModel):
             sigmas_squared_data = (np.dot(X, self.sigma_) * X).sum(axis=1)
             y_std = np.sqrt(sigmas_squared_data + (1. / self.alpha_))
             return y_mean, y_std
+
+    def score(self, X, y, sample_weight=None):
+        if self.scoreLL:
+            mean, var = self.predict(X, return_std=True)
+            return _gaussianLogLikelihood(y, mean, var).sum() / X.shape[0]
+        else:
+            return super(RegressorMixin, self).score(X, y, sample_weight)

@@ -188,7 +188,7 @@ class RegressionCircuit(BaseCircuit):
                 normalize=False,
                 copy_X=True,
                 n_iter=num_iterations,
-                # coef=self._parameters.flatten().numpy(),
+                # coef_init=self._parameters.flatten().numpy(),
                 # random_state=rand_gen, TODO?
                 **params
             )
