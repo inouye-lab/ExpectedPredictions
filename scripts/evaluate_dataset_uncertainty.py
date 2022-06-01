@@ -9,13 +9,12 @@ import os
 sys.path.append('.')
 
 import argparse
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 import gzip
 import pickle
 
 import numpy as np
-import torch
 from numpy.random import RandomState
 import pypsdd.psdd_io
 
@@ -26,7 +25,7 @@ from LogisticCircuit.util.DataSet import DataSet
 from pypsdd.vtree import Vtree as PSDD_Vtree
 from pypsdd.manager import PSddManager
 
-from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, sampleMonteCarloParameters, monteCarloPrediction
+from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood
 
 try:
@@ -41,6 +40,7 @@ class Result:
     method: str
     trainPercent: float
     missingPercent: float
+    runtime: Optional[float]
     totalError: np.ndarray
 
     inputLL: np.ndarray
@@ -67,6 +67,7 @@ class Result:
         self.inputVar = inputVar
         self.paramVar = paramVar
         self.totalVar = totalVar
+        self.runtime = None
 
     def print(self):
         print(f"{self.method} @ train {self.trainPercent}, missing {self.missingPercent}")
@@ -142,7 +143,7 @@ if __name__ == '__main__':
 
         # second loop is over missing value counts
         for (missing, testSet) in testSets:
-            print("Running {} missing".format(missing))
+            print("Running {} missing for delta".format(missing))
             # delta method
             start_t = perf_counter()
             lgc.zero_grad(True)
@@ -151,14 +152,16 @@ if __name__ == '__main__':
                 *deltaGaussianLogLikelihood(psdd, lgc, testSet)
             )
             result.print()
-            results.append(result)
             end_t = perf_counter()
+            result.runtime = end_t - start_t
+            results.append(result)
             print("Delta method at {} training and {} missing took {}"
-                  .format(percent, missing, (end_t - start_t)))
+                  .format(percent, missing, result.runtime))
 
         # monte carlo
         lgc.zero_grad(False)
         for (missing, testSet) in testSets:
+            print("Running {} missing for monte carlo".format(missing))
             start_t = perf_counter()
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
             result = Result(
@@ -166,18 +169,20 @@ if __name__ == '__main__':
                 *monteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
             )
             result.print()
+            end_t = perf_counter()
+            result.runtime = end_t - start_t
             results.append(result)
 
-            print(f"Finished all monte carlo predictions")
-            end_t = perf_counter()
             print("Monte carlo at {} training and {} missing took {}"
-                  .format(percent, missing, (end_t - start_t)))
+                  .format(percent, missing, result.runtime))
+
+        gc.collect()
 
     # results
-    formatStr = "{:<15} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25}"
+    formatStr = "{:<15} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25}"
     headers = [
         "Name", "Train Percent", "Missing Percent",
-        "Total Error",
+        "Runtime", "Total Error",
         "Input LL", "Param LL", "Total LL",
         "Input Var", "Param Var", "Total Var"
     ]
@@ -190,7 +195,7 @@ if __name__ == '__main__':
         for result in results:
             resultRow = [
                 result.method, result.trainPercent, result.missingPercent,
-                result.totalError.item(),
+                result.runtime, result.totalError.item(),
                 result.inputLL.item(), result.paramLL.item(), result.totalLL.item(),
                 result.inputVar.item(), result.paramVar.item(), result.totalVar.item()
             ]
