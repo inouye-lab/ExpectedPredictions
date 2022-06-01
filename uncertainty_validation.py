@@ -1,3 +1,5 @@
+import copy
+import numpy as np
 import torch
 from typing import Tuple
 
@@ -10,14 +12,37 @@ from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
     monteCarloPrediction, MonteCarloParams
 
+import gc
+from sklearn.linear_model._logistic import (_joblib_parallel_args)
+from joblib import Parallel, delayed
+
 
 def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
     """Evaluates the log likelihood for a gaussian distribution"""
-    return torch.log(torch.div(1, torch.sqrt(var) * 2 * torch.pi)) + 0.5 / var * ((x - mean) ** 2)
+    return -0.5 * torch.log(torch.mul(2 * torch.pi, var))\
+        + 0.5 / var * ((x - mean) ** 2)
 
 
-def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, params: MonteCarloParams
-                                    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, feature: np.ndarray,
+                         y: torch.Tensor, i: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Evaluates a single iteration of the monte carlo method, used for parallel"""
+    # evaluate model
+    feature = feature.reshape(1, -1)
+    # clone the circuit to prevent conflicting with the other threads
+    lgc = copy.deepcopy(lgc)
+    mean, sampleParamVar, sampleInputVar = monteCarloPrediction(psdd, lgc, params, feature, prefix=f"var {i}")
+    # add variances directly
+    totalVariance = sampleInputVar + sampleParamVar
+    # compute likelihoods
+    error = torch.abs(mean - y)
+    inputLikelihood = _gaussianLogLikelihood(y, mean, sampleInputVar)
+    parameterLikelihood = _gaussianLogLikelihood(y, mean, sampleParamVar)
+    totalLikelihood = _gaussianLogLikelihood(y, mean, totalVariance)
+    return error, inputLikelihood, parameterLikelihood, totalLikelihood, sampleInputVar, sampleParamVar, totalVariance
+
+
+def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, params: MonteCarloParams,
+                                    jobs: int = -1) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Computes likelihood and variances over the entire dataset
     @param psdd:      Probabilistic circuit root
@@ -28,35 +53,53 @@ def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: D
     @return  Tuple of mean, parameter variance
     """
     sampleCount = dataset.labels.size()[0]
-    size = (sampleCount,)
-    error:               torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    inputLikelihood:     torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    parameterLikelihood: torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    totalLikelihood:     torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    inputVariances:      torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    parameterVariances:  torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    totalVariances:      torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    for i in range(sampleCount):
-        # evaluate model
-        feature = dataset.images[i, :].reshape(1, -1)
-        mean, sampleParamVar, sampleInputVar = monteCarloPrediction(psdd, lgc, params, feature, prefix=f"var {i}")
-        # add variances directly
-        inputVariances[i]     = sampleInputVar
-        parameterVariances[i] = sampleParamVar
-        totalVariances[i]     = sampleInputVar + sampleParamVar
-        # compute likelihoods
-        y = dataset.labels[i]
-        error[i] = torch.abs(mean - y)
-        inputLikelihood[i]     = _gaussianLogLikelihood(y, mean, sampleInputVar)
-        parameterLikelihood[i] = _gaussianLogLikelihood(y, mean, sampleParamVar)
-        totalLikelihood[i]     = _gaussianLogLikelihood(y, mean, totalVariances[i])
+
+    # prepare parallel
+    delayedFunc = delayed(_monteCarloIteration)
+    result = Parallel(n_jobs=jobs,
+                      **_joblib_parallel_args(prefer='processes'))(
+        delayedFunc(psdd, lgc, params, dataset.images[i, :], dataset.labels[i], i)
+        for i in range(sampleCount)
+    )
+    error, \
+        inputLikelihood, parameterLikelihood, totalLikelihood, \
+        inputVariances, parameterVariances, totalVariances = zip(*result)
+    gc.collect()
 
     # return all six values
-    return torch.sum(error), torch.mean(inputLikelihood), torch.mean(parameterLikelihood), torch.mean(totalLikelihood), \
-        torch.mean(inputVariances), torch.mean(parameterVariances), torch.mean(totalVariances)
+    return torch.sum(torch.tensor(error)), torch.mean(torch.tensor(inputLikelihood)),\
+        torch.mean(torch.tensor(parameterLikelihood)), torch.mean(torch.tensor(totalLikelihood)), \
+        torch.mean(torch.tensor(inputVariances)), torch.mean(torch.tensor(parameterVariances)),\
+        torch.mean(torch.tensor(totalVariances))
 
 
-def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet
+def _deltaGaussianIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
+                            ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Evaluates a single iteration of the delta method, used for parallel"""
+
+    print(f"Evaluating delta method {i}", end='\r')
+    cache = EVCache()
+    feature = feature.reshape(1, -1)
+    # clone the circuit to prevent conflicting with the other threads
+    lgc = copy.deepcopy(lgc)
+    lgc._parameters = lgc._parameters.clone().detach()
+    lgc._parameters.requires_grad = True
+    lgc.set_node_parameters(lgc._parameters)
+
+    mean, sampleParamVar = deltaMeanAndParameterVariance(psdd, lgc, cache, feature)
+    sampleInputVar = deltaInputVariance(psdd, lgc, cache, feature)
+    # add variances directly
+    inputVariance = torch.abs(sampleInputVar)
+    totalVariance = inputVariance + sampleParamVar
+    # compute likelihoods
+    error = torch.abs(mean - y)
+    inputLikelihood = _gaussianLogLikelihood(y, mean, inputVariance)
+    parameterLikelihood = _gaussianLogLikelihood(y, mean, sampleParamVar)
+    totalLikelihood = _gaussianLogLikelihood(y, mean, totalVariance)
+    return error, inputLikelihood, parameterLikelihood, totalLikelihood, inputVariance, sampleParamVar, totalVariance
+
+
+def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1
                                ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Computes likelihood and variances over the entire dataset
@@ -66,31 +109,21 @@ def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSe
     @return  Tuple of mean, parameter variance
     """
     count = dataset.labels.size()[0]
-    size = (count,)
-    error:               torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    inputLikelihood:     torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    parameterLikelihood: torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    totalLikelihood:     torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    inputVariances:      torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    parameterVariances:  torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    totalVariances:      torch.Tensor = torch.zeros(size=size, dtype=torch.float64)
-    for i in range(count):
-        # evaluate model
-        cache = EVCache()
-        feature = dataset.images[i, :].reshape(1, -1)
-        mean, sampleParamVar = deltaMeanAndParameterVariance(psdd, lgc, cache, feature)
-        sampleInputVar = deltaInputVariance(psdd, lgc, cache, feature)
-        # add variances directly
-        inputVariances[i]     = torch.abs(sampleInputVar)
-        parameterVariances[i] = sampleParamVar
-        totalVariances[i]     = inputVariances[i] + sampleParamVar
-        # compute likelihoods
-        y = dataset.labels[i]
-        error[i] = torch.abs(mean - y)
-        inputLikelihood[i]     = _gaussianLogLikelihood(y, mean, inputVariances[i])
-        parameterLikelihood[i] = _gaussianLogLikelihood(y, mean, sampleParamVar)
-        totalLikelihood[i]     = _gaussianLogLikelihood(y, mean, totalVariances[i])
+
+    # prepare parallel
+    delayedFunc = delayed(_deltaGaussianIteration)
+    result = Parallel(n_jobs=jobs,
+                      **_joblib_parallel_args(prefer='processes'))(
+        delayedFunc(psdd, lgc, dataset.images[i, :], dataset.labels[i], i)
+        for i in range(count)
+    )
+    error, \
+        inputLikelihood, parameterLikelihood, totalLikelihood, \
+        inputVariances, parameterVariances, totalVariances = zip(*result)
+    gc.collect()
 
     # return all six values
-    return torch.sum(error), torch.mean(inputLikelihood), torch.mean(parameterLikelihood), torch.mean(totalLikelihood), \
-        torch.mean(inputVariances), torch.mean(parameterVariances), torch.mean(totalVariances)
+    return torch.sum(torch.tensor(error)), torch.mean(torch.tensor(inputLikelihood)),\
+        torch.mean(torch.tensor(parameterLikelihood)), torch.mean(torch.tensor(totalLikelihood)), \
+        torch.mean(torch.tensor(inputVariances)), torch.mean(torch.tensor(parameterVariances)),\
+        torch.mean(torch.tensor(totalVariances))
