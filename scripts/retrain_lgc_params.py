@@ -4,6 +4,7 @@ import gzip
 import math
 
 import pickle
+from datetime import datetime
 
 import numpy as np
 import os
@@ -64,6 +65,10 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', type=int, nargs='?',
                         default=1,
                         help='Verbosity level')
+
+    parser.add_argument('--exp-id', type=str,
+                        default=None,
+                        help='Dataset output suffix')
     #
     # parsing the args
     args = parser.parse_args()
@@ -118,7 +123,11 @@ if __name__ == '__main__':
     # reset parameters unless told to not
 
     circuitRoot = args.prefix + args.output
-    os.makedirs(os.path.dirname(circuitRoot), exist_ok=True)
+    if args.exp_id:
+        circuitRoot = os.path.join(circuitRoot, args.exp_id)
+    else:
+        circuitRoot = os.path.join(circuitRoot, datetime.now().strftime("%Y%m%d-%H%M%S"))
+    os.makedirs(circuitRoot, exist_ok=True)
 
     if not args.keep_params:
         print("Resetting parameters...")
@@ -192,7 +201,11 @@ if __name__ == '__main__':
             print(f"\taccuracy valid: {test_err:.5f}")
 
         # save circuit
-        circuitPath = circuitRoot + str(math.floor(percent * 100)) + 'percent.glc'
+        circuitPath = circuitRoot + '/' + str(percent * 100) + 'percent.glc'
         with open(circuitPath, 'w') as f:
             lgc.save(f)
         print(f'Circuit saved to {circuitPath}')
+        samplePath = circuitRoot + '/' + str(percent * 100) + 'percentSamples.txt'
+        with open(samplePath, 'w') as f:
+            for i in sampleIndexes:
+                f.write(str(i) + '\n')
