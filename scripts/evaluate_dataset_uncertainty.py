@@ -72,8 +72,8 @@ class Result:
     def print(self):
         print(f"{self.method} @ train {self.trainPercent}, missing {self.missingPercent}")
         print(f"    error: {self.totalError.item()}")
-        print(f"    ll: input {self.inputLL.item()}, input {self.paramLL.item()}, input {self.totalLL.item()}")
-        print(f"    var: input {self.inputVar.item()}, input {self.paramVar.item()}, input {self.totalVar.item()}")
+        print(f"    ll: input {self.inputLL.item()}, param {self.paramLL.item()}, total {self.totalLL.item()}")
+        print(f"    var: input {self.inputVar.item()}, param {self.paramVar.item()}, total {self.totalVar.item()}")
 
 
 if __name__ == '__main__':
