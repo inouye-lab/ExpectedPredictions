@@ -10,7 +10,7 @@ from LogisticCircuit.algo.BaseCircuit import BaseCircuit
 from LogisticCircuit.util.DataSet import DataSet
 from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
-    monteCarloPrediction, MonteCarloParams
+    monteCarloPrediction, MonteCarloParams, monteCarloPredictionParallel
 
 import gc
 from sklearn.linear_model._logistic import (_joblib_parallel_args)
@@ -71,6 +71,36 @@ def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: D
         torch.mean(torch.tensor(parameterLikelihood)), torch.mean(torch.tensor(totalLikelihood)), \
         torch.mean(torch.tensor(inputVariances)), torch.mean(torch.tensor(parameterVariances)),\
         torch.mean(torch.tensor(totalVariances))
+
+
+def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, params: MonteCarloParams,
+                                        jobs: int = -1) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """
+    Computes likelihood and variances over the entire dataset,
+    performing parallel over parameters and using torch to do parallel over inputs
+    @param psdd:      Probabilistic circuit root
+    @param lgc:       Logistic or regression circuit
+    @param dataset:   Dataset for computing the full value
+    @param params:    Parameters to use for estimates
+    @pa
+    @return  Tuple of mean, parameter variance
+    """
+    # prepare parallel
+    mean, parameterVariances, inputVariances = monteCarloPredictionParallel(psdd, lgc, params, dataset.images, jobs=jobs)
+
+    totalVariances = parameterVariances + inputVariances
+    error = torch.abs(mean - dataset.labels)
+    inputLikelihood = _gaussianLogLikelihood(dataset.labels, mean, inputVariances)
+    parameterLikelihood = _gaussianLogLikelihood(dataset.labels, mean, parameterVariances)
+    totalLikelihood = _gaussianLogLikelihood(dataset.labels, mean, totalVariances)
+
+    gc.collect()
+
+    # return all six values
+    return torch.sum(error), torch.mean(inputLikelihood),\
+        torch.mean(parameterLikelihood), torch.mean(totalLikelihood), \
+        torch.mean(inputVariances), torch.mean(parameterVariances),\
+        torch.mean(totalVariances)
 
 
 def _deltaGaussianIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int

@@ -26,7 +26,8 @@ from pypsdd.vtree import Vtree as PSDD_Vtree
 from pypsdd.manager import PSddManager
 
 from uncertainty_calculations import sampleMonteCarloParameters
-from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood
+from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
+    fastMonteCarloGaussianLogLikelihood
 
 try:
     from time import perf_counter
@@ -87,8 +88,14 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=str, help='Location for result csv')
     parser.add_argument("--classes", type=int, required=True,
                         help="Number of classes in the dataset")
-    parser.add_argument("--samples", type=int, required=True,
+
+    parser.add_argument("--skip_delta",  action='store_true',
+                        help="If set, the delta method is skipped, running just MC")
+    parser.add_argument("--samples", type=int, default=0,
                         help="Number of monte carlo samples")
+    parser.add_argument("--fast_samples", type=int, default=0,
+                        help="Number of fast monte carlo samples")
+
     parser.add_argument("--seed", type=int, default=1337,
                         help="Seed for dataset selection")
     parser.add_argument("--data", type=str, required=True,
@@ -136,45 +143,65 @@ if __name__ == '__main__':
     # first loop is over percents
     results: List[Result] = []
     for percent in args.data_percents:
-        print("Running {} percent".format(percent))
+        print("Running {} percent".format(percent*100))
         percentFolder = args.prefix + args.retrain_dir
         with open(percentFolder + str(percent*100) + "percent.glc", 'r') as circuit_file:
-            lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=True)
+            lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=not args.skip_delta)
 
         # second loop is over missing value counts
-        for (missing, testSet) in testSets:
-            print("Running {} missing for delta".format(missing))
-            # delta method
-            start_t = perf_counter()
-            lgc.zero_grad(True)
-            result = Result(
-                "Delta Method", percent, missing,
-                *deltaGaussianLogLikelihood(psdd, lgc, testSet)
-            )
-            result.print()
-            end_t = perf_counter()
-            result.runtime = end_t - start_t
-            results.append(result)
-            print("Delta method at {} training and {} missing took {}"
-                  .format(percent, missing, result.runtime))
+        if not args.skip_delta:
+            for (missing, testSet) in testSets:
+                print("Running {}% missing for delta".format(missing*100))
+                # delta method
+                start_t = perf_counter()
+                lgc.zero_grad(True)
+                result = Result(
+                    "Delta Method", percent, missing,
+                    *deltaGaussianLogLikelihood(psdd, lgc, testSet)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
+                print("Delta method at {}% training and {}% missing took {}"
+                      .format(percent*100, missing*100, result.runtime))
+
+        # Fast monte carlo, should let me get the accuracy far closer to Delta with less of a runtime hit
+        if args.fast_samples > 1:
+            for (missing, testSet) in testSets:
+                print("Running {}% missing for fast monte carlo".format(missing*100))
+                start_t = perf_counter()
+                params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
+                result = Result(
+                    "Fast MC", percent, missing,
+                    *fastMonteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
+
+                print("Fast monte carlo at {}% training and {}% missing took {}"
+                      .format(percent*100, missing*100, result.runtime))
 
         # monte carlo
         lgc.zero_grad(False)
-        for (missing, testSet) in testSets:
-            print("Running {} missing for monte carlo".format(missing))
-            start_t = perf_counter()
-            params = sampleMonteCarloParameters(lgc, args.samples, randState)
-            result = Result(
-                "Monte Carlo", percent, missing,
-                *monteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
-            )
-            result.print()
-            end_t = perf_counter()
-            result.runtime = end_t - start_t
-            results.append(result)
+        if args.samples > 1:
+            for (missing, testSet) in testSets:
+                print("Running {}% missing for monte carlo".format(missing*100))
+                start_t = perf_counter()
+                params = sampleMonteCarloParameters(lgc, args.samples, randState)
+                result = Result(
+                    "Monte Carlo", percent, missing,
+                    *monteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
 
-            print("Monte carlo at {} training and {} missing took {}"
-                  .format(percent, missing, result.runtime))
+                print("Monte carlo at {}% training and {}% missing took {}"
+                      .format(percent*100, missing*100, result.runtime))
 
         gc.collect()
 

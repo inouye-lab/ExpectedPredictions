@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import torch
 from typing import Tuple, List
@@ -7,6 +8,9 @@ from LogisticCircuit.algo.BaseCircuit import BaseCircuit
 from circuit_expect import Expectation, moment
 from numpy.random import RandomState
 from pypsdd import PSddNode
+
+from sklearn.linear_model._logistic import (_joblib_parallel_args)
+from joblib import Parallel, delayed
 
 
 MonteCarloParams = List[torch.Tensor]
@@ -111,20 +115,67 @@ def monteCarloPrediction(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloPar
     @return  Tuple of mean, parameter variance, and input variance
     """
     # collect samples for the first two moments, doing in a single loop saves effort setting the parameters
-    firstMoments = torch.zeros(size=(len(params),), dtype=torch.float)
-    secondMoments = torch.zeros(size=(len(params),), dtype=torch.float)
+    inputs = obsX.shape[0]
+    size = (inputs, len(params))
+    firstMoments = torch.zeros(size=size, dtype=torch.float)
+    secondMoments = torch.zeros(size=size, dtype=torch.float)
     for i, param in enumerate(params):
-        print(f"Evaluating {prefix} MC sample {i}", end='\r')
+        print(f"Evaluating {prefix} MC sample {i}                       ", end='\r')
         lgc.set_node_parameters(param)
         cache = EVCache()
-        firstMoments[i] = Expectation(psdd, lgc, cache, obsX).flatten()
-        secondMoments[i] = moment(psdd, lgc, 2, cache, obsX).flatten()
-    print(f"Finished {prefix} monte carlo predictions", end='\r')
+        firstMoments[:, i] = Expectation(psdd, lgc, cache, obsX)
+        secondMoments[:, i] = moment(psdd, lgc, 2, cache, obsX)
+    print(f"Finished {prefix} monte carlo predictions               ", end='\r')
 
     # E[M1(phi)]
-    mean = torch.mean(firstMoments)
+    mean = torch.mean(firstMoments, dim=1)
     # mean, var[M1[(phi)], E[M2(phi) - M1(phi)^2]
-    return mean, torch.std(firstMoments), torch.mean(secondMoments) - mean ** 2
+    return mean, torch.std(firstMoments, dim=1), torch.mean(secondMoments, dim=1) - mean ** 2
+
+
+def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, param: torch.Tensor,
+                         obsX: np.ndarray = None, prefix: str = '', i: int = -1
+                         ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Single iteration for the parallel monte carlo prediction"""
+    print(f"Evaluating {prefix} MC sample {i}                       ", end='\r')
+    lgc = copy.deepcopy(lgc)
+    lgc.set_node_parameters(param)
+    cache = EVCache()
+    firstMoment = Expectation(psdd, lgc, cache, obsX)
+    secondMoment = moment(psdd, lgc, 2, cache, obsX)
+    return firstMoment, secondMoment
+
+
+def monteCarloPredictionParallel(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams,
+                                 obsX: np.ndarray = None, prefix: str = '', jobs: int = -1
+                                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Performs a prediction of the mean, parameter variance, and input variance of the circuit.
+    Faster than calling the two other monte carlo methods if all three values are needed
+    @param psdd:    Probabilistic circuit root
+    @param lgc:     Logistic or regression circuit
+    @param params:  List of parameters to use for the samples,
+                    takes advantage of the fact we can reuse a cache for a given value
+    @param obsX:    Observation vector
+    @param prefix:  Prefix for printing
+    @param jobs:    Jobs to run in parallel
+    @return  Tuple of mean, parameter variance, and input variance
+    """
+    # collect samples for the first two moments, doing in a single loop saves effort setting the parameters
+    delayedFunc = delayed(_monteCarloIteration)
+    result = Parallel(n_jobs=jobs,
+                      **_joblib_parallel_args(prefer='processes'))(
+        delayedFunc(psdd, lgc, param, obsX, prefix, i)
+        for i, param in enumerate(params)
+    )
+    firstMoments, secondMoments = zip(*result)
+    firstMoments = torch.concat(firstMoments, dim=1)
+    secondMoments = torch.concat(secondMoments, dim=1)
+
+    # E[M1(phi)]
+    mean = torch.mean(firstMoments, dim=1)
+    # mean, var[M1[(phi)], E[M2(phi) - M1(phi)^2]
+    return mean, torch.std(firstMoments, dim=1), torch.mean(secondMoments, dim=1) - mean ** 2
 
 
 def deltaMeanAndParameterVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache,
