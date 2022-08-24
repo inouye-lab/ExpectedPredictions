@@ -228,16 +228,29 @@ def deltaInputVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: n
     return secondMoment - mean**2
 
 
-def exactInputVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: np.ndarray = None,
-                       mean: torch.Tensor = None, var: torch.Tensor = None) -> torch.Tensor:
+def exactDeltaTotalVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: np.ndarray = None,
+                            mean: torch.Tensor = None, inputVar: torch.Tensor = None) -> torch.Tensor:
     """
-    Computes the variance over the inputs for the circuit using the exact method
+    Computes the total variance for the circuit using the exact delta method
+    Note that after calling this function, the circuit parameters and the parameter mean may be out of sync
     @param psdd:  Probabilistic circuit root
     @param lgc:   Logistic or regression circuit
     @param cache: Cache for the given observed value, need to recreate for a different input
     @param mean:  Previously computed mean, if excluded computes it
-    @param var    Previously computed variance, if excluded computes it
+    @param inputVar    Previously computed input variance from deltaInputVariance, if excluded computes it
     @param obsX:  Observed value to input
     @return  Input variance
     """
-    raise Exception("Not yet implemented")
+    # the difference between approx input variance and exact total variance is an extra hessian term
+    # exact input variance also includes a negative parameter variance term, cancels out regular parameter variance
+    if inputVar is None:
+        inputVar = deltaInputVariance(psdd, lgc, cache, obsX, mean)
+
+    def hess_second_moment(params):
+        lgc.set_node_parameters(params)
+        return moment(psdd, lgc, 2, EVCache(), obsX)
+
+    originalParams = lgc.parameters
+    hess = torch.autograd.functional.hessian(hess_second_moment, originalParams)
+
+    return inputVar + torch.trace(torch.mm(hess.squeeze(), torch.from_numpy(lgc.covariance[0])))
