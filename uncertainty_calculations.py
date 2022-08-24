@@ -57,6 +57,7 @@ def _monteCarloFirstMoment(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloP
     return values
 
 
+# TODO cleanup - this method is unused and should probably be removed
 def monteCarloMeanAndParameterVariance(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams,
                                        obsX: np.ndarray = None) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -69,9 +70,12 @@ def monteCarloMeanAndParameterVariance(psdd: PSddNode, lgc: BaseCircuit, params:
     @return  Tuple of mean and parameter variance
     """
     values = _monteCarloFirstMoment(psdd, lgc, params, obsX)
-    return torch.mean(values), torch.std(values)
+    return torch.mean(values), torch.var(values)
 
 
+# TODO cleanup - this method is incorrect and should probably be removed
+# is calculating monte carlo estimate of the second moment and monte carlo estimate of the first moment,
+# instead of monte carlo estimate of the variance, no easy way to fix without removing mean parameter
 def monteCarloInputVariance(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, mean: torch.Tensor,
                             obsX: np.ndarray = None) -> torch.Tensor:
     """
@@ -130,7 +134,9 @@ def monteCarloPrediction(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloPar
     # E[M1(phi)]
     mean = torch.mean(firstMoments, dim=1)
     # mean, var[M1[(phi)], E[M2(phi) - M1(phi)^2]
-    return mean, torch.std(firstMoments, dim=1), torch.mean(secondMoments, dim=1) - mean ** 2
+    return mean,\
+        torch.var(firstMoments, dim=1),\
+        torch.mean(secondMoments - firstMoments ** 2, dim=1)
 
 
 def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, param: torch.Tensor,
@@ -172,10 +178,10 @@ def monteCarloPredictionParallel(psdd: PSddNode, lgc: BaseCircuit, params: Monte
     firstMoments = torch.concat(firstMoments, dim=1)
     secondMoments = torch.concat(secondMoments, dim=1)
 
-    # E[M1(phi)]
-    mean = torch.mean(firstMoments, dim=1)
-    # mean, var[M1[(phi)], E[M2(phi) - M1(phi)^2]
-    return mean, torch.std(firstMoments, dim=1), torch.mean(secondMoments, dim=1) - mean ** 2
+    # E[M1(phi)], var[M1[(phi)], E[M2(phi) - M1(phi)^2]
+    return torch.mean(firstMoments, dim=1),\
+        torch.var(firstMoments, dim=1),\
+        torch.mean(secondMoments - firstMoments ** 2, dim=1)
 
 
 def deltaMeanAndParameterVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache,
