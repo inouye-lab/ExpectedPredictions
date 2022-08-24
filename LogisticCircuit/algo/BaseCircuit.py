@@ -250,7 +250,7 @@ class BaseCircuit(object):
             self._parameters = torch.cat((self._parameters, element.parameter.reshape(-1, 1)), dim=1)
         gc.collect()
 
-    def set_node_parameters(self, parameters: torch.Tensor, set_circuit: bool = False,
+    def set_node_parameters(self, parameters: torch.Tensor, set_circuit: bool = False, set_require_grad: bool = False,
                             reset_covariance: bool = False) -> NoReturn:
         """
         Sets the parameters of the nodes from the given parameter tensor.
@@ -258,10 +258,13 @@ class BaseCircuit(object):
 
         @param parameters:       New parameters to set
         @param set_circuit:      If true, sets the parameters on the circuit itself
+        @param set_require_grad: If set_circuit is true and this is true, sets require_grad after cloning parameters
         @param reset_covariance: If true, resets the covariance on the circuit
         """
         if set_circuit:
             self._parameters = parameters.clone()
+            if set_require_grad:
+                self._parameters.requires_grad = True
             parameters = self._parameters
         self._bias = parameters[:, 0]
         for i in range(len(self._terminal_nodes)):
