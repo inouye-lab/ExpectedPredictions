@@ -1,4 +1,6 @@
 import copy
+
+import logging
 import numpy as np
 import torch
 from typing import Tuple, List
@@ -39,7 +41,7 @@ def sampleMonteCarloParameters(lgc: BaseCircuit, count: int, randState: RandomSt
     for i in range(count):
         print(f"Sample {i}", end='\r')
         params.append(samples[i, :].reshape(1, -1))
-    print(f"Finished monte carlo samples")
+    logging.info(f"Finished monte carlo samples")
     return params
 
 
@@ -53,7 +55,7 @@ def _monteCarloFirstMoment(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloP
         print(f"MC first moment {i}\r", end='\r')
         lgc.set_node_parameters(param)
         values[i] = Expectation(psdd, lgc, EVCache(), obsX).flatten()
-    print(f"Finished monte carlo first moment")
+    logging.info(f"Finished monte carlo first moment")
     return values
 
 
@@ -100,7 +102,7 @@ def monteCarloInputVariance(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarlo
         lgc.set_node_parameters(param)
         # TODO: share cache with above method
         values[i] = moment(psdd, lgc, 2, EVCache(), obsX).flatten()
-    print(f"Finished monte carlo input variance")
+    logging.info(f"Finished monte carlo input variance")
 
     return torch.mean(values) - mean**2
 

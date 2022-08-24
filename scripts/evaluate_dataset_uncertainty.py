@@ -1,3 +1,4 @@
+import json
 import math
 import sys
 
@@ -5,6 +6,9 @@ import csv
 import gc
 
 import os
+
+import logging
+from datetime import datetime
 
 sys.path.append('.')
 
@@ -109,10 +113,47 @@ if __name__ == '__main__':
     parser.add_argument("--data_percents", type=float, nargs='*',
                         help="Percentages of the dataset to use in training")
 
+    parser.add_argument('-v', '--verbose', type=int, nargs='?',
+                        default=1,
+                        help='Verbosity level')
     #
     # parsing the args
     args = parser.parse_args()
 
+    # setup logging
+    log_formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)-5.5s] [%(filename)s:%(funcName)s:%(lineno)d]\t %(message)s")
+    root_logger = logging.getLogger()
+
+    # to file
+    out_folder = os.path.dirname(args.output)
+    log_dir = os.path.join(out_folder, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    date_string = datetime.now().strftime("%Y%m%d-%H%M%S")
+    file_handler = logging.FileHandler("{0}/{1}.log".format(log_dir, date_string))
+    file_handler.setFormatter(log_formatter)
+    root_logger.addHandler(file_handler)
+
+    # and to console
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_formatter)
+    root_logger.addHandler(console_handler)
+
+    #
+    # setting verbosity level
+    if args.verbose == 1:
+        root_logger.setLevel(logging.INFO)
+    elif args.verbose == 2:
+        root_logger.setLevel(logging.DEBUG)
+
+    # Print welcome message
+    args_out_path = os.path.join(log_dir, date_string + '.json')
+    json_args = json.dumps(vars(args))
+    logging.info("Starting with arguments:\n%s\n\tdumped at %s", json_args, args_out_path)
+    with open(args_out_path, 'w') as f:
+        f.write(json_args)
+
+    # Now, to the script
     FOLDER = args.prefix + args.model
     VTREE_FILE = FOLDER + ".vtree"
     GLC_FILE = FOLDER + ".glc"
@@ -120,19 +161,19 @@ if __name__ == '__main__':
 
     lc_vtree = LC_Vtree.read(VTREE_FILE)
 
-    print("Loading samples...")
+    logging.info("Loading samples...")
     with gzip.open(args.data, 'rb') as f:
         rawData = pickle.load(f)
     _, (images, labels), _ = rawData
 
-    print("Loading PSDD..")
+    logging.info("Loading PSDD..")
     psdd_vtree = PSDD_Vtree.read(VTREE_FILE)
     manager = PSddManager(psdd_vtree)
     psdd = pypsdd.psdd_io.psdd_yitao_read(PSDD_FILE, manager)
     #################
 
     # populate missing datasets
-    print("Preparing missing datasets")
+    logging.info("Preparing missing datasets")
     randState = RandomState(args.seed)
     testSets: List[Tuple[float, DataSet]] = []
     samples = images.shape[0]
@@ -151,7 +192,7 @@ if __name__ == '__main__':
     # first loop is over percents
     results: List[Result] = []
     for percent in args.data_percents:
-        print("Running {} percent".format(percent*100))
+        logging.info("Running {} percent".format(percent*100))
         percentFolder = args.prefix + args.retrain_dir
         with open(percentFolder + str(percent*100) + "percent.glc", 'r') as circuit_file:
             lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=not args.skip_delta)
@@ -159,7 +200,7 @@ if __name__ == '__main__':
         # second loop is over missing value counts
         if not args.skip_delta:
             for (missing, testSet) in testSets:
-                print("Running {}% missing for delta".format(missing*100))
+                logging.info("Running {} at {}% missing for delta".format(args.model, missing*100))
                 # delta method
                 start_t = perf_counter()
                 lgc.zero_grad(True)
@@ -171,14 +212,14 @@ if __name__ == '__main__':
                 end_t = perf_counter()
                 result.runtime = end_t - start_t
                 results.append(result)
-                print("Delta method at {}% training and {}% missing took {}"
-                      .format(percent*100, missing*100, result.runtime))
+                logging.info("Delta method for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
 
         # Fast monte carlo, should let me get the accuracy far closer to Delta with less of a runtime hit
         lgc.zero_grad(False)
         if args.fast_samples > 1:
             for (missing, testSet) in testSets:
-                print("Running {}% missing for fast monte carlo".format(missing*100))
+                logging.info("Running {} at {}% missing for fast monte carlo".format(args.model, missing*100))
                 start_t = perf_counter()
                 params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
                 result = Result(
@@ -190,13 +231,13 @@ if __name__ == '__main__':
                 result.runtime = end_t - start_t
                 results.append(result)
 
-                print("Fast monte carlo at {}% training and {}% missing took {}"
-                      .format(percent*100, missing*100, result.runtime))
+                logging.info("Fast monte carlo for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
 
         # monte carlo
         if args.samples > 1:
             for (missing, testSet) in testSets:
-                print("Running {}% missing for monte carlo".format(missing*100))
+                logging.info("Running {} at {}% missing for monte carlo".format(args.model, missing*100))
                 start_t = perf_counter()
                 params = sampleMonteCarloParameters(lgc, args.samples, randState)
                 result = Result(
@@ -208,8 +249,8 @@ if __name__ == '__main__':
                 result.runtime = end_t - start_t
                 results.append(result)
 
-                print("Monte carlo at {}% training and {}% missing took {}"
-                      .format(percent*100, missing*100, result.runtime))
+                logging.info("Monte carlo for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
 
         gc.collect()
 
@@ -221,9 +262,8 @@ if __name__ == '__main__':
         "Input LL", "Param LL", "Total LL",
         "Input Var", "Param Var", "Total Var"
     ]
-    print(formatStr.format(*headers))
-    print("")
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    logging.info(formatStr.format(*headers))
+    logging.info("")
     with open(args.output, 'w') as f:
         writer = csv.writer(f)
         writer.writerow(headers)
@@ -234,5 +274,5 @@ if __name__ == '__main__':
                 result.inputLL.item(), result.paramLL.item(), result.totalLL.item(),
                 result.inputVar.item(), result.paramVar.item(), result.totalVar.item()
             ]
-            print(formatStr.format(*resultRow))
+            logging.info(formatStr.format(*resultRow))
             writer.writerow(resultRow)
