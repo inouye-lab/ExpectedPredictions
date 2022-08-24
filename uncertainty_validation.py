@@ -20,7 +20,7 @@ from joblib import Parallel, delayed
 def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
     """Evaluates the log likelihood for a gaussian distribution"""
     return -0.5 * torch.log(torch.mul(2 * torch.pi, var))\
-        + 0.5 / var * ((x - mean) ** 2)
+        - 0.5 / var * ((x - mean) ** 2)
 
 
 def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, feature: np.ndarray,
