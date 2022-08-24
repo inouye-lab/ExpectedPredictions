@@ -31,7 +31,7 @@ from pypsdd.manager import PSddManager
 
 from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
-    fastMonteCarloGaussianLogLikelihood
+    fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood
 
 try:
     from time import perf_counter
@@ -95,6 +95,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--skip_delta",  action='store_true',
                         help="If set, the delta method is skipped, running just MC")
+    parser.add_argument("--exact_delta",  action='store_true',
+                        help="If set, runs the exact delta method")
     parser.add_argument("--global_missing_features",  action='store_true',
                         help="If set, the same feature will be missing in all samples. If unset, each sample will have missing features selected separately")
     parser.add_argument("--samples", type=int, default=0,
@@ -213,6 +215,24 @@ if __name__ == '__main__':
                 result.runtime = end_t - start_t
                 results.append(result)
                 logging.info("Delta method for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
+
+        # exact delta should be more accurate than regular delta
+        if args.exact_delta:
+            for (missing, testSet) in testSets:
+                logging.info("Running {} at {}% missing for exact delta".format(args.model, missing*100))
+                # delta method
+                start_t = perf_counter()
+                lgc.zero_grad(True)
+                result = Result(
+                    "Delta Method", percent, missing,
+                    *exactDeltaGaussianLogLikelihood(psdd, lgc, testSet)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
+                logging.info("Exact delta method for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
 
         # Fast monte carlo, should let me get the accuracy far closer to Delta with less of a runtime hit
