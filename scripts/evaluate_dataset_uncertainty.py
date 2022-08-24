@@ -91,6 +91,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--skip_delta",  action='store_true',
                         help="If set, the delta method is skipped, running just MC")
+    parser.add_argument("--global_missing_features",  action='store_true',
+                        help="If set, the same feature will be missing in all samples. If unset, each sample will have missing features selected separately")
     parser.add_argument("--samples", type=int, default=0,
                         help="Number of monte carlo samples")
     parser.add_argument("--fast_samples", type=int, default=0,
@@ -133,11 +135,17 @@ if __name__ == '__main__':
     print("Preparing missing datasets")
     randState = RandomState(args.seed)
     testSets: List[Tuple[float, DataSet]] = []
+    samples = images.shape[0]
     variables = images.shape[1]
     for missing in args.missing:
-        sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
         testImages = np.copy(images)
-        testImages[:, sampleIndexes] = -1  # internal value representing missing
+        if args.global_missing_features:
+            sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
+            testImages[:, sampleIndexes] = -1  # internal value representing missing
+        else:
+            for i in range(samples):
+                sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
+                testImages[i, sampleIndexes] = -1 # internal value representing missing
         testSets.append((missing, DataSet(testImages, labels, one_hot = False)))
 
     # first loop is over percents
