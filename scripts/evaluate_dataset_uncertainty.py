@@ -175,6 +175,7 @@ if __name__ == '__main__':
                       .format(percent*100, missing*100, result.runtime))
 
         # Fast monte carlo, should let me get the accuracy far closer to Delta with less of a runtime hit
+        lgc.zero_grad(False)
         if args.fast_samples > 1:
             for (missing, testSet) in testSets:
                 print("Running {}% missing for fast monte carlo".format(missing*100))
@@ -193,7 +194,6 @@ if __name__ == '__main__':
                       .format(percent*100, missing*100, result.runtime))
 
         # monte carlo
-        lgc.zero_grad(False)
         if args.samples > 1:
             for (missing, testSet) in testSets:
                 print("Running {}% missing for monte carlo".format(missing*100))
