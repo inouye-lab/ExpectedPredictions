@@ -132,7 +132,7 @@ def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, datase
 
 
 def _deltaGaussianIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
-                            ) -> Tuple[Tensor, Tensor, Tensor]:
+                            ) -> Tuple[Tensor, Tensor]:
     """Evaluates a single iteration of the delta method, used for parallel"""
 
     print(f"Evaluating delta method {i}", end='\r')
@@ -142,15 +142,8 @@ def _deltaGaussianIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarra
     lgc = copy.deepcopy(lgc)
     lgc.set_node_parameters(lgc.parameters.detach(), set_circuit=True, set_require_grad=True)
 
-
     mean, sampleParamVar = deltaMeanAndParameterVariance(psdd, lgc, cache, feature)
-    # TODO: do I need a fresh cache?
-    # TODO: why do I not pass in the mean?
-    cache = EVCache()
-    sampleInputVar = deltaInputVariance(psdd, lgc, cache, feature)
-    # add variances directly
-    inputVariance = torch.clamp(sampleInputVar, min=0)  # was abs before
-    return mean, inputVariance, sampleParamVar
+    return mean, sampleParamVar
 
 
 def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1
@@ -164,7 +157,12 @@ def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSe
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, inputVariance, paramVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaGaussianIteration)
+    mean, paramVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaGaussianIteration)
+
+    # can easily batch input variance as we are not taking gradients there
+    inputVariance = deltaInputVariance(psdd, lgc, EVCache(), dataset.images)
+    # add variances directly
+    inputVariance = torch.clamp(inputVariance, min=0)
     totalVariance = inputVariance + paramVariance
 
     gc.collect()
