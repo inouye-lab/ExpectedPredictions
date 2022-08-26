@@ -22,8 +22,9 @@ SummaryType = Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]
 
 def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
     """Evaluates the log likelihood for a gaussian distribution"""
-    return -0.5 * torch.log(torch.mul(2 * torch.pi, var))\
-        - 0.5 / var * ((x - mean) ** 2)
+    clampVar = var.clamp(min=1e-15)
+    return -0.5 * torch.log(torch.mul(2 * torch.pi, clampVar))\
+        - 0.5 / clampVar * ((x - mean) ** 2)
 
 
 def _baseParallelOverSamples(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int, function, *args
