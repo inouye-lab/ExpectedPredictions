@@ -128,8 +128,7 @@ if __name__ == '__main__':
     root_logger = logging.getLogger()
 
     # to file
-    out_folder = os.path.dirname(args.output)
-    log_dir = os.path.join(out_folder, 'logs')
+    log_dir = os.path.join(args.output, 'logs')
     os.makedirs(log_dir, exist_ok=True)
     date_string = datetime.now().strftime("%Y%m%d-%H%M%S")
     file_handler = logging.FileHandler("{0}/{1}.log".format(log_dir, date_string))
@@ -149,7 +148,8 @@ if __name__ == '__main__':
         root_logger.setLevel(logging.DEBUG)
 
     # Print welcome message
-    args_out_path = os.path.join(log_dir, date_string + '.json')
+    outputName = args.model + "-" + date_string
+    args_out_path = os.path.join(log_dir, outputName + '.json')
     json_args = json.dumps(vars(args))
     logging.info("Starting with arguments:\n%s\n\tdumped at %s", json_args, args_out_path)
     with open(args_out_path, 'w') as f:
@@ -291,7 +291,8 @@ if __name__ == '__main__':
     # this is saved as a CSV, does not need to be in the log
     print(formatStr.format(*headers))
     print("")
-    with open(args.output, 'w') as f:
+    csvFile = os.path.join(args.output, outputName + ".csv")
+    with open(csvFile, 'w') as f:
         writer = csv.writer(f)
         writer.writerow(headers)
         for result in results:
