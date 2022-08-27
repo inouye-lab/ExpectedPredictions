@@ -234,11 +234,10 @@ def _deltaParamIteration(ignored: None, lgc: BaseCircuit, feature: np.ndarray, y
 
     print(f"Evaluating delta method for sample {i}", end='\r')
     feature = feature.reshape(1, -1)
-    # clone the circuit to prevent conflicting with the other threads
-    lgc = copy.deepcopy(lgc)
-    lgc.set_node_parameters(lgc.parameters.detach(), set_circuit=True, set_require_grad=True)
-
-    mean, sampleParamVar = uncertainty_baseline.deltaMeanAndParameterVariance(trainingSampleMean, lgc, feature)
+    # clone the parameters to prevent conflicting the gradients with the other threads
+    params = lgc.parameters.detach().clone()
+    params.requires_grad = True
+    mean, sampleParamVar = uncertainty_baseline.deltaMeanAndParameterVariance(trainingSampleMean, lgc, params, feature)
     return mean, sampleParamVar
 
 
