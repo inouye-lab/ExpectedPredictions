@@ -237,11 +237,12 @@ if __name__ == '__main__':
 
         # Fast monte carlo, should let me get the accuracy far closer to Delta with less of a runtime hit
         lgc.zero_grad(False)
+
         if args.fast_samples > 1:
+            params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
             for (missing, testSet) in testSets:
                 logging.info("Running {} at {}% missing for fast monte carlo".format(args.model, missing*100))
                 start_t = perf_counter()
-                params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
                 result = Result(
                     "Fast MC", percent, missing,
                     *fastMonteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
@@ -256,10 +257,10 @@ if __name__ == '__main__':
 
         # monte carlo
         if args.samples > 1:
+            params = sampleMonteCarloParameters(lgc, args.samples, randState)
             for (missing, testSet) in testSets:
                 logging.info("Running {} at {}% missing for monte carlo".format(args.model, missing*100))
                 start_t = perf_counter()
-                params = sampleMonteCarloParameters(lgc, args.samples, randState)
                 result = Result(
                     "Monte Carlo", percent, missing,
                     *monteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
