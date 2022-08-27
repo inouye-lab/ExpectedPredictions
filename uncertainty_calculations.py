@@ -212,7 +212,7 @@ def deltaMeanAndParameterVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCac
 
 
 def deltaInputVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: np.ndarray = None,
-                       mean: torch.Tensor = None) -> Tuple[torch.Tensor,torch.Tensor]:
+                       mean: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Computes the variance over the inputs for the circuit using the delta method
     @param psdd:  Probabilistic circuit root
@@ -227,7 +227,7 @@ def deltaInputVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: n
         mean = Expectation(psdd, lgc, cache, obsX)
     secondMoment = moment(psdd, lgc, 2, cache, obsX)
     # E[M2(phi) - M1(phi)^2]
-    return secondMoment - mean**2, mean
+    return secondMoment - mean**2, mean.flatten()
 
 
 def exactDeltaTotalVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: np.ndarray = None,

@@ -267,9 +267,26 @@ if __name__ == '__main__':
                              .format(args.model, percent*100, missing*100, result.runtime))
                 logging.info("----------------------------------------------------------------------------------------")
 
-        # Fast monte carlo, should let me get the accuracy far closer to Delta with less of a runtime hit
         lgc.zero_grad(False)
 
+        if args.input_baseline:
+            for (missing, testSet) in testSets:
+                logging.info("Running {} at {}% missing for input baseline".format(args.model, missing*100))
+                start_t = perf_counter()
+                result = Result(
+                    "BL Input", percent, missing,
+                    *inputLogLikelihood(psdd, lgc, testSet)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
+
+                logging.info("Input baseline for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
+
+        # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
         if args.fast_samples > 1:
             params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
             for (missing, testSet) in testSets:
@@ -287,6 +304,14 @@ if __name__ == '__main__':
                 logging.info("Fast monte carlo for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
                 logging.info("----------------------------------------------------------------------------------------")
+
+        # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
+        # have their values set to values from the current sample of the parameters. Most other methods assume the
+        # parameters are the mean as those tend to perform the best. As a result any non-MC method placed after a MC
+        # method will behave poorly
+
+        # We could of course reset the parameters after each trial to the mean value, but it did not seem necessary,
+        # sorting the test is simpler and makes the experiments run slightly faster.
 
         # monte carlo
         if args.samples > 1:
@@ -322,23 +347,6 @@ if __name__ == '__main__':
                 results.append(result)
 
                 logging.info("Monte carlo parameter baseline for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
-
-        if args.parameter_baseline and args.fast_samples > 0:
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for input baseline".format(args.model, missing*100))
-                start_t = perf_counter()
-                result = Result(
-                    "BL Input", percent, missing,
-                    *inputLogLikelihood(psdd, lgc, testSet)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-
-                logging.info("Input baseline for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
                 logging.info("----------------------------------------------------------------------------------------")
 
