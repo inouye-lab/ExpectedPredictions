@@ -75,10 +75,10 @@ class Result:
         self.runtime = None
 
     def print(self):
-        print(f"{self.method} @ train {self.trainPercent}, missing {self.missingPercent}")
-        print(f"    error: {self.totalError.item()}")
-        print(f"    ll: input {self.inputLL.item()}, param {self.paramLL.item()}, total {self.totalLL.item()}")
-        print(f"    var: input {self.inputVar.item()}, param {self.paramVar.item()}, total {self.totalVar.item()}")
+        logging.info(f"{self.method} @ train {self.trainPercent}, missing {self.missingPercent}")
+        logging.info(f"    error: {self.totalError.item()}")
+        logging.info(f"    ll: input {self.inputLL.item()}, param {self.paramLL.item()}, total {self.totalLL.item()}")
+        logging.info(f"    var: input {self.inputVar.item()}, param {self.paramVar.item()}, total {self.totalVar.item()}")
 
 
 if __name__ == '__main__':
@@ -195,6 +195,7 @@ if __name__ == '__main__':
     results: List[Result] = []
     for percent in args.data_percents:
         logging.info("Running {} percent".format(percent*100))
+        logging.info("========================================================================================")
         percentFolder = args.prefix + args.retrain_dir
         with open(percentFolder + str(percent*100) + "percent.glc", 'r') as circuit_file:
             lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=not args.skip_delta)
@@ -216,6 +217,7 @@ if __name__ == '__main__':
                 results.append(result)
                 logging.info("Delta method for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
 
         # exact delta should be more accurate than regular delta
         if args.exact_delta:
@@ -234,6 +236,7 @@ if __name__ == '__main__':
                 results.append(result)
                 logging.info("Exact delta method for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
 
         # Fast monte carlo, should let me get the accuracy far closer to Delta with less of a runtime hit
         lgc.zero_grad(False)
@@ -254,6 +257,7 @@ if __name__ == '__main__':
 
                 logging.info("Fast monte carlo for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
 
         # monte carlo
         if args.samples > 1:
@@ -272,19 +276,21 @@ if __name__ == '__main__':
 
                 logging.info("Monte carlo for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
 
         gc.collect()
 
     # results
-    formatStr = "{:<15} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25}"
+    formatStr = "{:<20} {:<15} {:<15} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20}"
     headers = [
         "Name", "Train Percent", "Missing Percent",
         "Runtime", "Total Error",
         "Input LL", "Param LL", "Total LL",
         "Input Var", "Param Var", "Total Var"
     ]
-    logging.info(formatStr.format(*headers))
-    logging.info("")
+    # this is saved as a CSV, does not need to be in the log
+    print(formatStr.format(*headers))
+    print("")
     with open(args.output, 'w') as f:
         writer = csv.writer(f)
         writer.writerow(headers)
@@ -295,5 +301,6 @@ if __name__ == '__main__':
                 result.inputLL.item(), result.paramLL.item(), result.totalLL.item(),
                 result.inputVar.item(), result.paramVar.item(), result.totalVar.item()
             ]
-            logging.info(formatStr.format(*resultRow))
+            # this is saved as a CSV, does not need to be in the log
+            print(formatStr.format(*resultRow))
             writer.writerow(resultRow)
