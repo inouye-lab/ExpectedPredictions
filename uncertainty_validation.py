@@ -5,8 +5,10 @@ from typing import Tuple, List, Optional
 
 from torch import Tensor
 
+import uncertainty_baseline
 from EVCache import EVCache
 from LogisticCircuit.algo.BaseCircuit import BaseCircuit
+from LogisticCircuit.algo.RegressionCircuit import RegressionCircuit
 from LogisticCircuit.util.DataSet import DataSet
 from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
@@ -27,7 +29,7 @@ def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tenso
         - 0.5 / clampVar * ((x - mean) ** 2)
 
 
-def _baseParallelOverSamples(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int, function, *args
+def _baseParallelOverSamples(psdd: Optional[PSddNode], lgc: BaseCircuit, dataset: DataSet, jobs: int, function, *args
                              ) -> List[Tensor]:
     """
     Shared logic between any method that parallels over count
@@ -131,11 +133,10 @@ def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, datase
     return _summarize(dataset, mean, inputVariances, parameterVariances, totalVariances)
 
 
-def _deltaGaussianIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
+def _deltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
                             ) -> Tuple[Tensor, Tensor]:
     """Evaluates a single iteration of the delta method, used for parallel"""
-
-    print(f"Evaluating delta method {i}", end='\r')
+    print(f"Evaluating delta method for sample {i}", end='\r')
     cache = EVCache()
     feature = feature.reshape(1, -1)
     # clone the circuit to prevent conflicting with the other threads
@@ -157,10 +158,10 @@ def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSe
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, paramVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaGaussianIteration)
+    mean, paramVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaIteration)
 
     # can easily batch input variance as we are not taking gradients there
-    inputVariance = deltaInputVariance(psdd, lgc, EVCache(), dataset.images)
+    inputVariance, _ = deltaInputVariance(psdd, lgc, EVCache(), dataset.images)
     # add variances directly
     inputVariance = torch.clamp(inputVariance, min=0)
     totalVariance = inputVariance + paramVariance
@@ -169,11 +170,11 @@ def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSe
     return _summarize(dataset, mean, inputVariance, paramVariance, totalVariance)
 
 
-def _exactDeltaGaussianIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
+def _exactDeltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
                                  ) -> Tuple[Tensor, Tensor, Tensor]:
     """Evaluates a single iteration of the exact delta method, used for parallel"""
 
-    print(f"Evaluating delta method {i}", end='\r')
+    print(f"Evaluating delta method for sample {i}", end='\r')
     cache = EVCache()
     feature = feature.reshape(1, -1)
     # clone the circuit to prevent conflicting with the other threads
@@ -188,8 +189,7 @@ def _exactDeltaGaussianIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.n
     return mean, sampleParamVar, totalVariance
 
 
-def exactDeltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1
-                                    ) -> SummaryType:
+def exactDeltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset
     @param psdd:    Probabilistic circuit root
@@ -199,8 +199,80 @@ def exactDeltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: D
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, paramVariance, totalVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _exactDeltaGaussianIteration)
+    mean, paramVariance, totalVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _exactDeltaIteration)
     inputVariance = totalVariance - paramVariance
 
     gc.collect()
     return _summarize(dataset, mean, inputVariance, paramVariance, totalVariance)
+
+
+def monteCarloParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, dataset: DataSet,
+                                 params: MonteCarloParams, jobs = -1) -> SummaryType:
+    """
+    Baseline function to test the parameter variance using the monte carlo method without considering input variance.
+    Missing values are handled through a training sample mean.
+
+    @param trainingSampleMean: Average value of each feature in the training data
+    @param lgc:                Circuit instance
+    @param dataset:            Dataset for computing the full value
+    @param params:             Parameters to use for estimates
+    @param jobs:    Max number of parallel jobs to run, use -1 to use the max possible
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+    # prepare parallel
+    mean, parameterVariances = uncertainty_baseline.monteCarloPredictionParallel(
+        trainingSampleMean, lgc, params, dataset.images, prefix='Baseline Param', jobs=jobs)
+
+    gc.collect()
+    return _summarize(dataset, mean, torch.tensor(0, dtype=torch.float), parameterVariances, parameterVariances)
+
+
+def _deltaParamIteration(ignored: None, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int,
+                         trainingSampleMean: torch.Tensor) -> Tuple[Tensor, Tensor]:
+    """Evaluates a single iteration of the delta method, used for parallel"""
+
+    print(f"Evaluating delta method for sample {i}", end='\r')
+    feature = feature.reshape(1, -1)
+    # clone the circuit to prevent conflicting with the other threads
+    lgc = copy.deepcopy(lgc)
+    lgc.set_node_parameters(lgc.parameters.detach(), set_circuit=True, set_require_grad=True)
+
+    mean, sampleParamVar = uncertainty_baseline.deltaMeanAndParameterVariance(trainingSampleMean, lgc, feature)
+    return mean, sampleParamVar
+
+
+def deltaParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1):
+    """
+    Baseline function to test the parameter variance using the delta method without considering input variance.
+    Missing values are handled through a training sample mean.
+
+    @param trainingSampleMean: Average value of each feature in the training data
+    @param lgc:                Circuit instance
+    @param dataset:            Dataset for computing the full value
+    @param jobs:               Max number of parallel jobs to run, use -1 to use the max possible
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+    mean, paramVariance = _baseParallelOverSamples(None, lgc, dataset, jobs, _deltaParamIteration, trainingSampleMean)
+
+    gc.collect()
+    return _summarize(dataset, mean, torch.tensor(0, dtype=torch.float), paramVariance, paramVariance)
+
+
+def inputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet) -> SummaryType:
+    """
+    Computes likelihood and input variances over the entire dataset
+    @param psdd:    Probabilistic circuit root
+    @param lgc:     Logistic or regression circuit
+    @param dataset: Dataset for computing the full value
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+    # delta method for input variance is already essentially the same as only considering input variance
+    # difference is just the training method (and the fact delta normally gets param variance)
+    inputVariance, mean = deltaInputVariance(psdd, lgc, EVCache(), dataset.images)
+    inputVariance = torch.clamp(inputVariance, min=0)
+
+    gc.collect()
+    return _summarize(dataset, mean, inputVariance, torch.tensor(0, dtype=torch.float), inputVariance)

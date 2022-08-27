@@ -447,6 +447,14 @@ class BaseCircuit(object):
         return copied_element
 
     @abstractmethod
+    def predict(self, features: np.ndarray) -> torch.Tensor:
+        pass
+
+    def predict_regression(self, features: np.ndarray) -> torch.Tensor:
+        """All circuits are treated as a regression circuit within the expectation logic"""
+        return torch.mm(torch.from_numpy(features), self._parameters.T)
+
+    @abstractmethod
     def save(self, f: TextIO) -> NoReturn:
         pass
 

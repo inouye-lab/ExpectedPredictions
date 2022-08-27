@@ -23,6 +23,7 @@ from numpy.random import RandomState
 import pypsdd.psdd_io
 
 from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
+from LogisticCircuit.algo.RegressionCircuit import RegressionCircuit
 from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
 from LogisticCircuit.util.DataSet import DataSet
 
@@ -31,7 +32,8 @@ from pypsdd.manager import PSddManager
 
 from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
-    fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood
+    fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
+    deltaParamLogLikelihood, inputLogLikelihood
 
 try:
     from time import perf_counter
@@ -97,6 +99,10 @@ if __name__ == '__main__':
                         help="If set, the delta method is skipped, running just MC")
     parser.add_argument("--exact_delta",  action='store_true',
                         help="If set, runs the exact delta method")
+    parser.add_argument("--parameter_baseline",  action='store_true',
+                        help="If set, runs the baseline parameter uncertainty using the dataset mean")
+    parser.add_argument("--input_baseline",  action='store_true',
+                        help="If set, runs the baseline input uncertainty using the parameter mean")
     parser.add_argument("--global_missing_features",  action='store_true',
                         help="If set, the same feature will be missing in all samples. If unset, each sample will have missing features selected separately")
     parser.add_argument("--samples", type=int, default=0,
@@ -166,7 +172,7 @@ if __name__ == '__main__':
     logging.info("Loading samples...")
     with gzip.open(args.data, 'rb') as f:
         rawData = pickle.load(f)
-    _, (images, labels), _ = rawData
+    (trainingImages, _), (images, labels), _ = rawData
 
     logging.info("Loading PSDD..")
     psdd_vtree = PSDD_Vtree.read(VTREE_FILE)
@@ -191,6 +197,9 @@ if __name__ == '__main__':
                 testImages[i, sampleIndexes] = -1 # internal value representing missing
         testSets.append((missing, DataSet(testImages, labels, one_hot = False)))
 
+    if args.parameter_baseline:
+        trainingSampleMean = np.mean(trainingImages, axis=0)
+
     # first loop is over percents
     results: List[Result] = []
     for percent in args.data_percents:
@@ -198,7 +207,8 @@ if __name__ == '__main__':
         logging.info("========================================================================================")
         percentFolder = args.prefix + args.retrain_dir
         with open(percentFolder + str(percent*100) + "percent.glc", 'r') as circuit_file:
-            lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=not args.skip_delta)
+            requireGrad = not args.skip_delta or args.exact_delta
+            lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=requireGrad)
 
         # second loop is over missing value counts
         if not args.skip_delta:
@@ -216,6 +226,25 @@ if __name__ == '__main__':
                 result.runtime = end_t - start_t
                 results.append(result)
                 logging.info("Delta method for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
+
+        # second loop is over missing value counts
+        if not args.skip_delta and args.parameter_baseline:
+            for (missing, testSet) in testSets:
+                logging.info("Running {} at {}% missing for delta param baseline".format(args.model, missing*100))
+                # delta method
+                start_t = perf_counter()
+                lgc.zero_grad(True)
+                result = Result(
+                    "BL Delta Param", percent, missing,
+                    *deltaParamLogLikelihood(trainingSampleMean, lgc, testSet)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
+                logging.info("Delta param baseline for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
                 logging.info("----------------------------------------------------------------------------------------")
 
@@ -275,6 +304,41 @@ if __name__ == '__main__':
                 results.append(result)
 
                 logging.info("Monte carlo for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
+
+        if args.parameter_baseline and args.fast_samples > 0:
+            params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
+            for (missing, testSet) in testSets:
+                logging.info("Running {} at {}% missing for monte carlo parameter baseline".format(args.model, missing*100))
+                start_t = perf_counter()
+                result = Result(
+                    "BL Param MC", percent, missing,
+                    *monteCarloParamLogLikelihood(trainingSampleMean, lgc, testSet, params)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
+
+                logging.info("Monte carlo parameter baseline for {} at {}% training and {}% missing took {}"
+                             .format(args.model, percent*100, missing*100, result.runtime))
+                logging.info("----------------------------------------------------------------------------------------")
+
+        if args.parameter_baseline and args.fast_samples > 0:
+            for (missing, testSet) in testSets:
+                logging.info("Running {} at {}% missing for input baseline".format(args.model, missing*100))
+                start_t = perf_counter()
+                result = Result(
+                    "BL Input", percent, missing,
+                    *inputLogLikelihood(psdd, lgc, testSet)
+                )
+                result.print()
+                end_t = perf_counter()
+                result.runtime = end_t - start_t
+                results.append(result)
+
+                logging.info("Input baseline for {} at {}% training and {}% missing took {}"
                              .format(args.model, percent*100, missing*100, result.runtime))
                 logging.info("----------------------------------------------------------------------------------------")
 

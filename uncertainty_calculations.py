@@ -212,7 +212,7 @@ def deltaMeanAndParameterVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCac
 
 
 def deltaInputVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: np.ndarray = None,
-                       mean: torch.Tensor = None) -> torch.Tensor:
+                       mean: torch.Tensor = None) -> Tuple[torch.Tensor,torch.Tensor]:
     """
     Computes the variance over the inputs for the circuit using the delta method
     @param psdd:  Probabilistic circuit root
@@ -227,7 +227,7 @@ def deltaInputVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: n
         mean = Expectation(psdd, lgc, cache, obsX)
     secondMoment = moment(psdd, lgc, 2, cache, obsX)
     # E[M2(phi) - M1(phi)^2]
-    return secondMoment - mean**2
+    return secondMoment - mean**2, mean
 
 
 def exactDeltaTotalVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: np.ndarray = None,
@@ -246,7 +246,7 @@ def exactDeltaTotalVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, ob
     # the difference between approx input variance and exact total variance is an extra hessian term
     # exact input variance also includes a negative parameter variance term, cancels out regular parameter variance
     if inputVar is None:
-        inputVar = deltaInputVariance(psdd, lgc, cache, obsX, mean)
+        inputVar, _ = deltaInputVariance(psdd, lgc, cache, obsX, mean)
 
     def hess_second_moment(params):
         lgc.set_node_parameters(params)
