@@ -24,7 +24,7 @@ SummaryType = Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]
 
 def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
     """Evaluates the log likelihood for a gaussian distribution"""
-    clampVar = var.clamp(min=1e-15)
+    clampVar = var.clamp(min=1e-10)
     return -0.5 * torch.log(torch.mul(2 * torch.pi, clampVar))\
         - 0.5 / clampVar * ((x - mean) ** 2)
 
