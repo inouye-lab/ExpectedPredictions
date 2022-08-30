@@ -232,7 +232,7 @@ def monteCarloParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircui
         trainingSampleMean, lgc, params, dataset.images, prefix='Baseline Param', jobs=jobs)
 
     gc.collect()
-    return _summarize(dataset, mean, torch.tensor(0, dtype=torch.float), parameterVariances, parameterVariances)
+    return _summarize(dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float), parameterVariances, parameterVariances)
 
 
 def _deltaParamIteration(ignored: None, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int,
@@ -263,7 +263,7 @@ def deltaParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, da
     mean, paramVariance = _baseParallelOverSamples(None, lgc, dataset, jobs, _deltaParamIteration, trainingSampleMean)
 
     gc.collect()
-    return _summarize(dataset, mean, torch.tensor(0, dtype=torch.float), paramVariance, paramVariance)
+    return _summarize(dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float), paramVariance, paramVariance)
 
 
 def inputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet) -> SummaryType:
@@ -281,4 +281,4 @@ def inputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet) -> Su
     inputVariance = torch.clamp(inputVariance, min=0)
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariance, torch.tensor(0, dtype=torch.float), inputVariance)
+    return _summarize(dataset, mean, inputVariance, torch.zeros(size=mean.shape, dtype=torch.float), inputVariance)
