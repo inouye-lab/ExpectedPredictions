@@ -242,7 +242,7 @@ if __name__ == '__main__':
                 lgc.zero_grad(True)
 
             # print experiment header
-            logging.info("{}: Running {} at {}% missing".format(args.model, name, missing * 100))
+            logging.info("{}: Running {} at {}% training, {}% missing".format(args.model, name, trainPercent * 100, missing * 100))
 
             # run experiment
             start_t = perf_counter()
