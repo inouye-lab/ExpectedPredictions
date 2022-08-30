@@ -8,7 +8,6 @@ from torch import Tensor
 import uncertainty_baseline
 from EVCache import EVCache
 from LogisticCircuit.algo.BaseCircuit import BaseCircuit
-from LogisticCircuit.algo.RegressionCircuit import RegressionCircuit
 from LogisticCircuit.util.DataSet import DataSet
 from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
@@ -19,7 +18,14 @@ from sklearn.linear_model._logistic import (_joblib_parallel_args)
 from joblib import Parallel, delayed
 
 
-SummaryType = Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]
+SummaryType = Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]
+"""
+Result of an experiment, contains:
+  Total error,
+  avg input LL, avg param LL, avg total LL,
+  avg input var, avg param var, avg total var,
+  full mean vector, full input var vector, full param var vector
+"""
 
 
 def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
@@ -78,7 +84,8 @@ def _summarize(dataset: DataSet, mean: torch.Tensor,
     return torch.sum(error), torch.mean(inputLikelihood),\
         torch.mean(parameterLikelihood), torch.mean(totalLikelihood), \
         torch.mean(inputVariances), torch.mean(parameterVariances),\
-        torch.mean(totalVariances)
+        torch.mean(totalVariances), \
+        mean, inputVariances, parameterVariances
 
 
 def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray,
@@ -93,7 +100,7 @@ def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray,
     return mean, sampleInputVar, sampleParamVar
 
 
-def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, params: MonteCarloParams,
+def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, dataset: DataSet,
                                     jobs: int = -1) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset
@@ -112,7 +119,7 @@ def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: D
     return _summarize(dataset, mean, inputVariances, parameterVariances, totalVariances)
 
 
-def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, params: MonteCarloParams,
+def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, dataset: DataSet,
                                         jobs: int = -1) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset,
@@ -206,8 +213,8 @@ def exactDeltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: D
     return _summarize(dataset, mean, inputVariance, paramVariance, totalVariance)
 
 
-def monteCarloParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, dataset: DataSet,
-                                 params: MonteCarloParams, jobs = -1) -> SummaryType:
+def monteCarloParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, params: MonteCarloParams,
+                                 dataset: DataSet, jobs = -1) -> SummaryType:
     """
     Baseline function to test the parameter variance using the monte carlo method without considering input variance.
     Missing values are handled through a training sample mean.

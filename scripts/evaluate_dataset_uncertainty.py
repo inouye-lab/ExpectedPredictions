@@ -10,6 +10,8 @@ import os
 import logging
 from datetime import datetime
 
+from torch import Tensor
+
 sys.path.append('.')
 
 import argparse
@@ -23,7 +25,6 @@ from numpy.random import RandomState
 import pypsdd.psdd_io
 
 from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
-from LogisticCircuit.algo.RegressionCircuit import RegressionCircuit
 from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
 from LogisticCircuit.util.DataSet import DataSet
 
@@ -33,7 +34,7 @@ from pypsdd.manager import PSddManager
 from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
-    deltaParamLogLikelihood, inputLogLikelihood
+    deltaParamLogLikelihood, inputLogLikelihood, SummaryType
 
 try:
     from time import perf_counter
@@ -48,20 +49,20 @@ class Result:
     trainPercent: float
     missingPercent: float
     runtime: Optional[float]
-    totalError: np.ndarray
+    totalError: Tensor
 
-    inputLL: np.ndarray
-    paramLL: np.ndarray
-    totalLL: np.ndarray
+    inputLL: Tensor
+    paramLL: Tensor
+    totalLL: Tensor
 
-    inputVar: np.ndarray
-    paramVar: np.ndarray
-    totalVar: np.ndarray
+    inputVar: Tensor
+    paramVar: Tensor
+    totalVar: Tensor
 
     def __init__(self, method: str, trainPercent: float, missingPercent: float,
-                 totalError: np.ndarray,
-                 inputLL: np.ndarray, paramLL: np.ndarray, totalLL: np.ndarray,
-                 inputVar: np.ndarray, paramVar: np.ndarray, totalVar: np.ndarray):
+                 totalError: Tensor,
+                 inputLL: Tensor, paramLL: Tensor, totalLL: Tensor,
+                 inputVar: Tensor, paramVar: Tensor, totalVar: Tensor):
         self.method = method
         self.trainPercent = trainPercent
         self.missingPercent = missingPercent
@@ -74,6 +75,7 @@ class Result:
         self.inputVar = inputVar
         self.paramVar = paramVar
         self.totalVar = totalVar
+
         self.runtime = None
 
     def print(self):
@@ -81,6 +83,14 @@ class Result:
         logging.info(f"    error: {self.totalError.item()}")
         logging.info(f"    ll: input {self.inputLL.item()}, param {self.paramLL.item()}, total {self.totalLL.item()}")
         logging.info(f"    var: input {self.inputVar.item()}, param {self.paramVar.item()}, total {self.totalVar.item()}")
+
+    def getResultRow(self):
+        return [
+            self.method, self.trainPercent, self.missingPercent,
+            self.runtime, self.totalError.item(),
+            self.inputLL.item(), self.paramLL.item(), self.totalLL.item(),
+            self.inputVar.item(), self.paramVar.item(), self.totalVar.item()
+        ]
 
 
 if __name__ == '__main__':
@@ -194,7 +204,7 @@ if __name__ == '__main__':
         else:
             for i in range(samples):
                 sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
-                testImages[i, sampleIndexes] = -1 # internal value representing missing
+                testImages[i, sampleIndexes] = -1  # internal value representing missing
         testSets.append((missing, DataSet(testImages, labels, one_hot = False)))
 
     if args.parameter_baseline:
@@ -202,6 +212,72 @@ if __name__ == '__main__':
 
     # first loop is over percents
     results: List[Result] = []
+
+    # start CSV files for output
+    resultsSummaryFile = open(os.path.join(args.output, outputName + "-summary.csv"), 'w')
+    allResultsFile = open(os.path.join(args.output, outputName + "-all.csv"), 'w')
+    resultsSummary = csv.writer(resultsSummaryFile)
+    allResults = csv.writer(allResultsFile)
+    csvHeaders = [
+        "Name", "Train Percent", "Missing Percent",
+        "Runtime", "Total Error",
+        "Input LL", "Param LL", "Total LL",
+        "Input Var", "Param Var", "Total Var"
+    ]
+    resultsSummary.writerow(csvHeaders)
+    allResults.writerow([
+        "Name", "Train Percent", "Missing Percent", "Sample Index",
+        "Expected", "Mean", "Input Variance", "Parameter Variance"
+    ])
+    resultsSummaryFile.flush()
+    allResultsFile.flush()
+
+    # all experiments follow a general form, so abstract that out a bit
+    # Argument signature: experiment_function(*experiment_arguments, testSet)
+    def run_experiment(name: str, trainPercent: float, experiment_function, *experiment_arguments,
+                       zero_grad: bool = False):
+        for (missing, testSet) in testSets:
+            testSet: DataSet
+            if zero_grad:
+                lgc.zero_grad(True)
+
+            # print experiment header
+            logging.info("{}: Running {} at {}% missing".format(args.model, name, missing * 100))
+
+            # run experiment
+            start_t = perf_counter()
+            experiment_result: SummaryType = experiment_function(*experiment_arguments, testSet)
+            result = Result(name, trainPercent, missing, *experiment_result[0:7])
+            end_t = perf_counter()
+            result.runtime = end_t - start_t
+            results.append(result)
+
+            # save to CSV file
+            resultsSummary.writerow(result.getResultRow())
+            resultsSummaryFile.flush()
+            # save full results
+            mean, inputVariance, parameterVariance = experiment_result[7:10]
+            length = len(testSet.labels)
+            assert len(mean) == length
+            assert len(inputVariance) == length
+            assert len(parameterVariance) == length
+            for sample in range(length):
+                allResults.writerow([
+                    name, trainPercent, missing, sample,
+                    testSet.labels[sample].item(),
+                    mean[sample].item(),
+                    inputVariance[sample].item(),
+                    parameterVariance[sample].item(),
+                ])
+            allResultsFile.flush()
+
+            # print progress
+            result.print()
+            logging.info("{}: {} at {}% training and {}% missing took {}"
+                         .format(args.model, name, percent * 100, missing * 100, result.runtime))
+            logging.info("----------------------------------------------------------------------------------------")
+
+    # main experiment loop
     for percent in args.data_percents:
         logging.info("Running {} percent".format(percent*100))
         logging.info("========================================================================================")
@@ -212,98 +288,25 @@ if __name__ == '__main__':
 
         # second loop is over missing value counts
         if not args.skip_delta:
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for delta".format(args.model, missing*100))
-                # delta method
-                start_t = perf_counter()
-                lgc.zero_grad(True)
-                result = Result(
-                    "Delta Method", percent, missing,
-                    *deltaGaussianLogLikelihood(psdd, lgc, testSet)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-                logging.info("Delta method for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
+            run_experiment("Delta Method", percent, deltaGaussianLogLikelihood, psdd, lgc, zero_grad=True)
 
         # second loop is over missing value counts
         if not args.skip_delta and args.parameter_baseline:
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for delta param baseline".format(args.model, missing*100))
-                # delta method
-                start_t = perf_counter()
-                lgc.zero_grad(True)
-                result = Result(
-                    "BL Delta Param", percent, missing,
-                    *deltaParamLogLikelihood(trainingSampleMean, lgc, testSet)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-                logging.info("Delta param baseline for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
+            run_experiment("BL Delta Param", percent, deltaParamLogLikelihood, trainingSampleMean, lgc, zero_grad=True)
 
         # exact delta should be more accurate than regular delta
         if args.exact_delta:
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for exact delta".format(args.model, missing*100))
-                # delta method
-                start_t = perf_counter()
-                lgc.zero_grad(True)
-                result = Result(
-                    "Delta Method", percent, missing,
-                    *exactDeltaGaussianLogLikelihood(psdd, lgc, testSet)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-                logging.info("Exact delta method for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
+            run_experiment("Exact Delta", percent, exactDeltaGaussianLogLikelihood, psdd, lgc, zero_grad=True)
 
         lgc.zero_grad(False)
 
         if args.input_baseline:
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for input baseline".format(args.model, missing*100))
-                start_t = perf_counter()
-                result = Result(
-                    "BL Input", percent, missing,
-                    *inputLogLikelihood(psdd, lgc, testSet)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-
-                logging.info("Input baseline for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
+            run_experiment("BL Input", percent, inputLogLikelihood, psdd, lgc)
 
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
         if args.fast_samples > 1:
             params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for fast monte carlo".format(args.model, missing*100))
-                start_t = perf_counter()
-                result = Result(
-                    "Fast MC", percent, missing,
-                    *fastMonteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-
-                logging.info("Fast monte carlo for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
+            run_experiment("Fast MC", percent, fastMonteCarloGaussianLogLikelihood, psdd, lgc, params)
 
         # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
         # have their values set to values from the current sample of the parameters. Most other methods assume the
@@ -316,64 +319,22 @@ if __name__ == '__main__':
         # monte carlo
         if args.samples > 1:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for monte carlo".format(args.model, missing*100))
-                start_t = perf_counter()
-                result = Result(
-                    "Monte Carlo", percent, missing,
-                    *monteCarloGaussianLogLikelihood(psdd, lgc, testSet, params)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-
-                logging.info("Monte carlo for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
+            run_experiment("Monte Carlo", percent, monteCarloGaussianLogLikelihood, psdd, lgc, params)
 
         if args.parameter_baseline and args.fast_samples > 0:
             params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
-            for (missing, testSet) in testSets:
-                logging.info("Running {} at {}% missing for monte carlo parameter baseline".format(args.model, missing*100))
-                start_t = perf_counter()
-                result = Result(
-                    "BL Param MC", percent, missing,
-                    *monteCarloParamLogLikelihood(trainingSampleMean, lgc, testSet, params)
-                )
-                result.print()
-                end_t = perf_counter()
-                result.runtime = end_t - start_t
-                results.append(result)
-
-                logging.info("Monte carlo parameter baseline for {} at {}% training and {}% missing took {}"
-                             .format(args.model, percent*100, missing*100, result.runtime))
-                logging.info("----------------------------------------------------------------------------------------")
+            run_experiment("Monte Carlo", percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
         gc.collect()
 
+    resultsSummaryFile.close()
+    allResultsFile.close()
+
     # results
     formatStr = "{:<20} {:<15} {:<15} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20}"
-    headers = [
-        "Name", "Train Percent", "Missing Percent",
-        "Runtime", "Total Error",
-        "Input LL", "Param LL", "Total LL",
-        "Input Var", "Param Var", "Total Var"
-    ]
     # this is saved as a CSV, does not need to be in the log
-    print(formatStr.format(*headers))
+    print(formatStr.format(*csvHeaders))
     print("")
-    csvFile = os.path.join(args.output, outputName + ".csv")
-    with open(csvFile, 'w') as f:
-        writer = csv.writer(f)
-        writer.writerow(headers)
-        for result in results:
-            resultRow = [
-                result.method, result.trainPercent, result.missingPercent,
-                result.runtime, result.totalError.item(),
-                result.inputLL.item(), result.paramLL.item(), result.totalLL.item(),
-                result.inputVar.item(), result.paramVar.item(), result.totalVar.item()
-            ]
-            # this is saved as a CSV, does not need to be in the log
-            print(formatStr.format(*resultRow))
-            writer.writerow(resultRow)
+    for result in results:
+        # this is saved as a CSV, does not need to be in the log
+        print(formatStr.format(*result.getResultRow()))
