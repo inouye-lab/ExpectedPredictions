@@ -323,7 +323,7 @@ if __name__ == '__main__':
 
         if args.parameter_baseline and args.fast_samples > 0:
             params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
-            run_experiment("Monte Carlo", percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
+            run_experiment("BL MC Param", percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
         gc.collect()
 
