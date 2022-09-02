@@ -1,0 +1,1 @@
+{"dataset": "data/abalone/abalone.pklz", "output": "exp/uncertainty/abalone/ridge/", "seed": 1337, "exp_id": null, "alpha": 0.2, "n_iter_sl": 100, "n_iter_pl": 15, "depth": 2, "n_splits": 3, "psdd_n_iter": 100, "vtree": "balanced", "psdd_jar": "./exp/psdd/psdd.jar", "psdd_jar_path": "./exp/psdd/", "regression": true, "solver": "auto", "baseline": false, "verbose": 1}

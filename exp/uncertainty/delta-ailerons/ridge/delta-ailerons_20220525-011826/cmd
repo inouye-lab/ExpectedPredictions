@@ -1,0 +1,8 @@
+learnPsdd search -v exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826/delta-ailerons.vtree -m l-1 -o exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826 -d exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826/delta-ailerons.train -b exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826/delta-ailerons.valid -e 100
+learnPsdd
+trainData:	exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826/delta-ailerons.train
+validData:	exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826/delta-ailerons.valid
+testData:	null
+vtreeFile:	exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826/delta-ailerons.vtree
+psddFile:	null
+out:	exp/uncertainty/delta-ailerons/ridge/delta-ailerons_20220525-011826

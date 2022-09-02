@@ -1,0 +1,8 @@
+learnPsdd search -v exp/uncertainty/elevators/ridge/elevators_20220525-013304/elevators.vtree -m l-1 -o exp/uncertainty/elevators/ridge/elevators_20220525-013304 -d exp/uncertainty/elevators/ridge/elevators_20220525-013304/elevators.train -b exp/uncertainty/elevators/ridge/elevators_20220525-013304/elevators.valid -e 100
+learnPsdd
+trainData:	exp/uncertainty/elevators/ridge/elevators_20220525-013304/elevators.train
+validData:	exp/uncertainty/elevators/ridge/elevators_20220525-013304/elevators.valid
+testData:	null
+vtreeFile:	exp/uncertainty/elevators/ridge/elevators_20220525-013304/elevators.vtree
+psddFile:	null
+out:	exp/uncertainty/elevators/ridge/elevators_20220525-013304

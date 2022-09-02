@@ -1,0 +1,8 @@
+learnPsdd search -v exp/uncertainty/abalone/ridge/abalone_20220525-011515/abalone.vtree -m l-1 -o exp/uncertainty/abalone/ridge/abalone_20220525-011515 -d exp/uncertainty/abalone/ridge/abalone_20220525-011515/abalone.train -b exp/uncertainty/abalone/ridge/abalone_20220525-011515/abalone.valid -e 100
+learnPsdd
+trainData:	exp/uncertainty/abalone/ridge/abalone_20220525-011515/abalone.train
+validData:	exp/uncertainty/abalone/ridge/abalone_20220525-011515/abalone.valid
+testData:	null
+vtreeFile:	exp/uncertainty/abalone/ridge/abalone_20220525-011515/abalone.vtree
+psddFile:	null
+out:	exp/uncertainty/abalone/ridge/abalone_20220525-011515

@@ -1,0 +1,8 @@
+learnPsdd search -v exp/uncertainty/insurance/ridge/insurance_20220525-013220/insurance.vtree -m l-1 -o exp/uncertainty/insurance/ridge/insurance_20220525-013220 -d exp/uncertainty/insurance/ridge/insurance_20220525-013220/insurance.train -b exp/uncertainty/insurance/ridge/insurance_20220525-013220/insurance.valid -e 100
+learnPsdd
+trainData:	exp/uncertainty/insurance/ridge/insurance_20220525-013220/insurance.train
+validData:	exp/uncertainty/insurance/ridge/insurance_20220525-013220/insurance.valid
+testData:	null
+vtreeFile:	exp/uncertainty/insurance/ridge/insurance_20220525-013220/insurance.vtree
+psddFile:	null
+out:	exp/uncertainty/insurance/ridge/insurance_20220525-013220
