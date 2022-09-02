@@ -147,7 +147,7 @@ if __name__ == '__main__':
     log_dir = os.path.join(args.output, 'logs')
     os.makedirs(log_dir, exist_ok=True)
     date_string = datetime.now().strftime("%Y%m%d-%H%M%S")
-    file_handler = logging.FileHandler("{0}/{1}.log".format(log_dir, date_string))
+    file_handler = logging.FileHandler("{0}/{1}-{2}.log".format(log_dir, args.model, date_string))
     file_handler.setFormatter(log_formatter)
     root_logger.addHandler(file_handler)
 
