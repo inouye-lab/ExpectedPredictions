@@ -9,7 +9,6 @@ from typing import Optional, TextIO, List, NoReturn, Tuple, Union, Dict, Set
 import numpy as np
 import torch
 from numpy.random import RandomState
-from sklearn.metrics import mean_squared_error
 
 # from .Ridge import Ridge
 from sklearn.linear_model import Ridge
@@ -155,11 +154,6 @@ class RegressionCircuit(BaseCircuit):
     #     accuracy = np.sum(y == data.labels) / data.num_samples
     #     return accuracy
 
-    def calculate_error(self, data: DataSet) -> float:
-        """Calculate accuracy given the learned parameters on the provided data."""
-        y = self.predict(data.features)
-        mse = mean_squared_error(data.labels, y)
-        return mse
 
     # def predict(self, features):
     #     y = self.predict_prob(features)
@@ -218,7 +212,7 @@ class RegressionCircuit(BaseCircuit):
 
         # grid search if given grid search params
         if cv_params is not None:
-            model = GridSearchCV(model, cv_params, n_jobs=num_cores)
+            model = GridSearchCV(model, cv_params, cv=min(5, data.labels.shape[0]), n_jobs=num_cores)
 
         print("About to fit model")
         model.fit(data.features, data.labels.numpy())

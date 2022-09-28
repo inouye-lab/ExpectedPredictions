@@ -2,6 +2,7 @@ import copy
 import gc
 from abc import abstractmethod
 from collections import deque
+from sklearn.metrics import mean_squared_error
 
 import numpy as np
 import torch
@@ -9,6 +10,7 @@ from typing import Optional, List, NoReturn, Set, Deque, Tuple, Union, TextIO
 
 from numpy.random import RandomState
 
+from ..util.DataSet import DataSet
 from ..structure.AndGate import AndGate, AndChildNode
 from ..structure.CircuitNode import CircuitTerminal, OrGate
 from ..structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE
@@ -453,6 +455,18 @@ class BaseCircuit(object):
     def predict_regression(self, features: np.ndarray) -> torch.Tensor:
         """All circuits are treated as a regression circuit within the expectation logic"""
         return torch.mm(torch.from_numpy(features), self._parameters.T)
+
+    def calculate_accuracy(self, data: DataSet) -> float:
+        """Calculate accuracy given the learned parameters on the provided data."""
+        y = self.predict(data.features)
+        accuracy = torch.div(torch.sum(y.eq(data.labels)), data.num_samples)
+        return accuracy.item()
+
+    def calculate_error(self, data: DataSet) -> float:
+        """Calculate accuracy given the learned parameters on the provided data."""
+        y = self.predict_regression(data.features)
+        mse = mean_squared_error(data.labels, y)
+        return mse
 
     @abstractmethod
     def save(self, f: TextIO) -> NoReturn:

@@ -118,12 +118,6 @@ class LogisticCircuit(BaseCircuit):
         gc.collect()
         return [x[0] for x in selected]
 
-    def calculate_accuracy(self, data: DataSet) -> float:
-        """Calculate accuracy given the learned parameters on the provided data."""
-        y = self.predict(data.features)
-        accuracy = torch.div(torch.sum(y.eq(data.labels)), data.num_samples)
-        return accuracy.item()
-
     def predict(self, features: np.ndarray) -> torch.Tensor:
         y = self.predict_prob(features)
         return torch.argmax(y, dim=1)

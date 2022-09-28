@@ -182,7 +182,10 @@ if __name__ == '__main__':
     logging.info("Loading samples...")
     with gzip.open(args.data, 'rb') as f:
         rawData = pickle.load(f)
-    (trainingImages, _), (images, labels), _ = rawData
+    # TODO: that might be the wrong dataset for evaluation
+    (trainingImages, trainingLabels), (images, labels), _ = rawData
+    validImages = images
+    validLabels = labels
 
     logging.info("Loading PSDD..")
     psdd_vtree = PSDD_Vtree.read(VTREE_FILE)
@@ -208,6 +211,7 @@ if __name__ == '__main__':
         testSets.append((missing, DataSet(testImages, labels, one_hot = False)))
 
     if args.parameter_baseline:
+        # TODO: should probably use samples from the param percentage
         trainingSampleMean = np.mean(trainingImages, axis=0)
 
     # first loop is over percents
@@ -278,13 +282,25 @@ if __name__ == '__main__':
             logging.info("----------------------------------------------------------------------------------------")
 
     # main experiment loop
+    retrainFolder = args.prefix + args.retrain_dir
     for percent in args.data_percents:
         logging.info("Running {} percent".format(percent*100))
         logging.info("========================================================================================")
-        percentFolder = args.prefix + args.retrain_dir
-        with open(percentFolder + str(percent*100) + "percent.glc", 'r') as circuit_file:
+        percentFolder = retrainFolder + str(percent*100)
+        with open(percentFolder + "percent.glc", 'r') as circuit_file:
             requireGrad = not args.skip_delta or args.exact_delta
             lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=requireGrad)
+        with open(percentFolder + "percentSamples.txt", 'r') as sample_file:
+            indices = [int(v.strip()) for v in sample_file.readlines()]
+
+            trainingData = DataSet(
+                np.concatenate((trainingImages, validImages), axis=0)[indices, :],
+                np.concatenate((trainingLabels, validLabels), axis=0)[indices],
+                one_hot=False)
+            trainingData.features = lgc.calculate_features(trainingData.images)
+            mse = lgc.calculate_error(trainingData)
+            logging.info("MSE for {} percent: {}".format(percent*100, mse))
+            logging.info("----------------------------------------------------------------------------------------")
 
         # second loop is over missing value counts
         if not args.skip_delta:
