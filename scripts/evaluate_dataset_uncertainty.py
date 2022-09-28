@@ -34,7 +34,8 @@ from pypsdd.manager import PSddManager
 from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
-    deltaParamLogLikelihood, inputLogLikelihood, SummaryType
+    deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
+    inputLogLikelihoodBenchmarkTime
 
 try:
     from time import perf_counter
@@ -117,8 +118,8 @@ if __name__ == '__main__':
                         help="If set, the same feature will be missing in all samples. If unset, each sample will have missing features selected separately")
     parser.add_argument("--samples", type=int, default=0,
                         help="Number of monte carlo samples")
-    parser.add_argument("--fast_samples", type=int, default=0,
-                        help="Number of fast monte carlo samples")
+    parser.add_argument("--benchmark_time",  action='store_true',
+                        help="If set, disables batching on several methods to make the times more comparable")
 
     parser.add_argument("--seed", type=int, default=1337,
                         help="Seed for dataset selection")
@@ -304,7 +305,8 @@ if __name__ == '__main__':
 
         # second loop is over missing value counts
         if not args.skip_delta:
-            run_experiment("Delta Method", percent, deltaGaussianLogLikelihood, psdd, lgc, zero_grad=True)
+            method = deltaGaussianLogLikelihoodBenchmarkTime if args.benchmark_time else deltaGaussianLogLikelihood
+            run_experiment("Delta Method", percent, method, psdd, lgc, zero_grad=True)
 
         # second loop is over missing value counts
         if not args.skip_delta and args.parameter_baseline:
@@ -317,12 +319,14 @@ if __name__ == '__main__':
         lgc.zero_grad(False)
 
         if args.input_baseline:
-            run_experiment("BL Input", percent, inputLogLikelihood, psdd, lgc)
+            method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
+            run_experiment("BL Input", percent, method, psdd, lgc)
 
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
-        if args.fast_samples > 1:
-            params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
-            run_experiment("Fast MC", percent, fastMonteCarloGaussianLogLikelihood, psdd, lgc, params)
+        if args.samples > 1:
+            params = sampleMonteCarloParameters(lgc, args.samples, randState)
+            method = monteCarloGaussianLogLikelihood if args.benchmark_time else fastMonteCarloGaussianLogLikelihood
+            run_experiment("Monte Carlo", percent, method, psdd, lgc, params)
 
         # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
         # have their values set to values from the current sample of the parameters. Most other methods assume the
@@ -332,13 +336,8 @@ if __name__ == '__main__':
         # We could of course reset the parameters after each trial to the mean value, but it did not seem necessary,
         # sorting the test is simpler and makes the experiments run slightly faster.
 
-        # monte carlo
-        if args.samples > 1:
+        if args.parameter_baseline and args.samples > 0:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
-            run_experiment("Monte Carlo", percent, monteCarloGaussianLogLikelihood, psdd, lgc, params)
-
-        if args.parameter_baseline and args.fast_samples > 0:
-            params = sampleMonteCarloParameters(lgc, args.fast_samples, randState)
             run_experiment("BL MC Param", percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
         gc.collect()
