@@ -1,9 +1,10 @@
 import argparse
-
+import json
 import gzip
 import math
 
 import pickle
+import logging
 from datetime import datetime
 
 import numpy as np
@@ -11,6 +12,9 @@ import os
 import torch
 from numpy.random import RandomState
 from typing import Tuple, List
+import sys
+
+sys.path.append('.')
 
 from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
 from LogisticCircuit.algo.RegressionCircuit import RegressionCircuit
@@ -73,12 +77,51 @@ if __name__ == '__main__':
     # parsing the args
     args = parser.parse_args()
 
+    # determine output folder
+    circuitRoot = args.prefix + args.output
+    if args.exp_id:
+        circuitRoot = os.path.join(circuitRoot, args.exp_id)
+    else:
+        circuitRoot = os.path.join(circuitRoot, datetime.now().strftime("%Y%m%d-%H%M%S"))
+    os.makedirs(circuitRoot, exist_ok=True)
+
+    # setup logging
+    log_formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)-5.5s] [%(filename)s:%(funcName)s:%(lineno)d]\t %(message)s")
+    root_logger = logging.getLogger()
+
+    # to file
+    log_dir = os.path.join(args.output, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    date_string = datetime.now().strftime("%Y%m%d-%H%M%S")
+    file_handler = logging.FileHandler("{0}/retrain.log".format(circuitRoot))
+    file_handler.setFormatter(log_formatter)
+    root_logger.addHandler(file_handler)
+
+    # and to console
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_formatter)
+    root_logger.addHandler(console_handler)
+
+    # setting verbosity level
+    if args.verbose == 1:
+        root_logger.setLevel(logging.INFO)
+    elif args.verbose == 2:
+        root_logger.setLevel(logging.DEBUG)
+
+    # Print welcome message
+    args_out_path = os.path.join(circuitRoot, 'args.json')
+    json_args = json.dumps(vars(args))
+    logging.info("Starting with arguments:\n%s\n\tdumped at %s", json_args, args_out_path)
+    with open(args_out_path, 'w') as f:
+        f.write(json_args)
+
     # Load in existing model
     modelBase = args.prefix + args.model
     vtreeFile = modelBase + ".vtree"
     glcFle = modelBase + ".glc"
 
-    print("Loading circuit...")
+    logging.info("Loading circuit...")
     vtree = LC_Vtree.read(vtreeFile)
     randState = RandomState(args.seed)
     with open(glcFle) as circuit_file:
@@ -87,7 +130,7 @@ if __name__ == '__main__':
         else:
             lgc = LogisticCircuit(vtree, args.classes, circuit_file=circuit_file, rand_gen=randState)
 
-    print("Loading samples...")
+    logging.info("Loading samples...")
     with gzip.open(args.data, 'rb') as f:
         rawData = pickle.load(f)
     (x_train, y_train), (x_valid, y_valid), (x_test, y_test) = rawData
@@ -96,10 +139,10 @@ if __name__ == '__main__':
         y_valid = y_valid.astype(np.int8)
         y_test = y_test.astype(np.int8)
 
-    print(f'\nLoaded dataset splits of shapes:')
-    print(f'\t\ttrain {x_train.shape} {y_train.shape}')
-    print(f'\t\tvalid {x_valid.shape} {y_valid.shape}')
-    print(f'\t\ttest  {x_test.shape} {y_test.shape}')
+    logging.info(f'\nLoaded dataset splits of shapes:')
+    logging.info(f'\t\ttrain {x_train.shape} {y_train.shape}')
+    logging.info(f'\t\tvalid {x_valid.shape} {y_valid.shape}')
+    logging.info(f'\t\ttest  {x_test.shape} {y_test.shape}')
 
     # create baseline datasets
     one_hot = not args.regression
@@ -121,19 +164,11 @@ if __name__ == '__main__':
     # select random data for training
 
     # reset parameters unless told to not
-
-    circuitRoot = args.prefix + args.output
-    if args.exp_id:
-        circuitRoot = os.path.join(circuitRoot, args.exp_id)
-    else:
-        circuitRoot = os.path.join(circuitRoot, datetime.now().strftime("%Y%m%d-%H%M%S"))
-    os.makedirs(circuitRoot, exist_ok=True)
-
     if not args.keep_params:
-        print("Resetting parameters...")
+        logging.info("Resetting parameters...")
         lgc.randomize_node_parameters()
 
-    print("Saving original parameters...")
+    logging.info("Saving original parameters...")
     originalParams = lgc.parameters.clone()
 
     # train for each selected percent
@@ -142,10 +177,10 @@ if __name__ == '__main__':
     if args.enforce_subsets:
         indexes = randState.permutation(totalSamples)
     for i, percent in enumerate(args.data_percents):
-        print("\nRestoring parameters...")
+        logging.info("\nRestoring parameters...")
         lgc.set_node_parameters(originalParams.clone(), set_circuit=True, reset_covariance=True)
 
-        print("Selecting samples...")
+        logging.info("Selecting samples...")
         sampleCount = max(2, math.floor(totalSamples * percent))
         if args.enforce_subsets:
             sampleIndexes = indexes[0:sampleCount]
@@ -156,18 +191,25 @@ if __name__ == '__main__':
         train_data = DataSet(x, y, one_hot)
         train_data.features = lgc.calculate_features(train_data.images)
 
-        print(f"Training circuit for {percent * 100} percent with {y.shape[0]} samples...")
+        logging.info(f"Training circuit for {percent * 100} percent with {y.shape[0]} samples...")
         if args.regression:
             pl_start_t = perf_counter()
             lgc.learn_parameters(
                 train_data, args.n_iter_pl, rand_gen=randState, solver=args.solver,
                 params={
                     'scoreLL': True,
+                    'threshold_lambda': 1e100,
                     # 'lambda_init': 0.1
                 },
-                cv_params={
-                    'lambda_init': [0.01, 0.1, 1, 10, 100],
-                }
+                #cv_params={
+                    # 'threshold_lambda': [1.e-4, 1.e-3, 1.e-2, 1.e-1, 1., 1.e+1, 1.e+2, 1.e+3, 1.e+4, 1.e+5, 1.e+6, 1.e+7],
+                #     # 'alpha_init': [1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, None],
+                #     # 'lambda_init': [0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000],
+                #     # 'alpha_1':  [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
+                #     # 'alpha_2':  [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
+                #     # 'lambda_1': [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
+                #     # 'lambda_2': [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
+                #}
             )
             pl_end_t = perf_counter()
 
@@ -176,12 +218,12 @@ if __name__ == '__main__':
             valid_err: float = lgc.calculate_error(valid_data)
             test_err: float = lgc.calculate_error(test_data)
 
-            print(f"done learning in {pl_end_t - pl_start_t} secs")
-            print(f"\tcircuit size: {lgc.num_parameters}")
-            print(f"\terror train: {train_acc:.5f}")
-            print(f"\terror full train: {full_train_acc:.5f}")
-            print(f"\terror test: {valid_err:.5f}")
-            print(f"\terror valid: {test_err:.5f}")
+            logging.info(f"done learning in {pl_end_t - pl_start_t} secs")
+            logging.info(f"\tcircuit size: {lgc.num_parameters}")
+            logging.info(f"\terror train: {train_acc:.5f}")
+            logging.info(f"\terror full train: {full_train_acc:.5f}")
+            logging.info(f"\terror test: {valid_err:.5f}")
+            logging.info(f"\terror valid: {test_err:.5f}")
 
         else:
             pl_start_t = perf_counter()
@@ -193,18 +235,18 @@ if __name__ == '__main__':
             valid_err = lgc.calculate_accuracy(valid_data)
             test_err = lgc.calculate_accuracy(test_data)
 
-            print(f"done learning in {pl_end_t - pl_start_t} secs")
-            print(f"\tcircuit size: {lgc.num_parameters}")
-            print(f"\taccuracy train: {train_acc:.5f}")
-            print(f"\taccuracy full train: {full_train_acc:.5f}")
-            print(f"\taccuracy test: {valid_err:.5f}")
-            print(f"\taccuracy valid: {test_err:.5f}")
+            logging.info(f"done learning in {pl_end_t - pl_start_t} secs")
+            logging.info(f"\tcircuit size: {lgc.num_parameters}")
+            logging.info(f"\taccuracy train: {train_acc:.5f}")
+            logging.info(f"\taccuracy full train: {full_train_acc:.5f}")
+            logging.info(f"\taccuracy test: {valid_err:.5f}")
+            logging.info(f"\taccuracy valid: {test_err:.5f}")
 
         # save circuit
         circuitPath = circuitRoot + '/' + str(percent * 100) + 'percent.glc'
         with open(circuitPath, 'w') as f:
             lgc.save(f)
-        print(f'Circuit saved to {circuitPath}')
+        logging.info(f'Circuit saved to {circuitPath}')
         samplePath = circuitRoot + '/' + str(percent * 100) + 'percentSamples.txt'
         with open(samplePath, 'w') as f:
             for i in sampleIndexes:
