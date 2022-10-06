@@ -214,10 +214,6 @@ if __name__ == '__main__':
                 testImages[i, sampleIndexes] = -1  # internal value representing missing
         testSets.append((missing, DataSet(testImages, labels, one_hot = False)))
 
-    if args.parameter_baseline:
-        # TODO: should probably use samples from the param percentage
-        trainingSampleMean = np.mean(trainingImages, axis=0)
-
     # first loop is over percents
     results: List[Result] = []
 
@@ -305,6 +301,11 @@ if __name__ == '__main__':
             mse = lgc.calculate_error(trainingData)
             logging.info("MSE for {} percent: {}".format(percent*100, mse))
             logging.info("----------------------------------------------------------------------------------------")
+
+        # sample the training sample mean from the same set of images we use for evaluation
+        # will be a bit more accurate to what we can actually produce as far as missing value imputation
+        if args.parameter_baseline:
+            trainingSampleMean = np.mean(trainingData.images, axis=0)
 
         # second loop is over missing value counts
         if not args.skip_delta:
