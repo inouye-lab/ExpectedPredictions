@@ -54,6 +54,9 @@ if __name__ == '__main__':
                         help="Regression instead of classification")
     parser.add_argument("--solver", type=str, default="auto",
                         help="Method used to compute the parameters for the circuit")
+    parser.add_argument('--params', type=json.loads, default=None, help='Additional arguments to pass to the solver')
+    parser.add_argument('--cv_params', type=json.loads, default=None, help='If set, additional solver arguments to perform cross validation over')
+
     parser.add_argument("--keep_params",  action='store_true',
                         help="If set, does not discard the parameters of the circuit before training. By default the original parameters are discarded")
     parser.add_argument("--use_valid",  action='store_true',
@@ -73,6 +76,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp-id', type=str,
                         default=None,
                         help='Dataset output suffix')
+
     #
     # parsing the args
     args = parser.parse_args()
@@ -176,6 +180,7 @@ if __name__ == '__main__':
     indexes = None
     if args.enforce_subsets:
         indexes = randState.permutation(totalSamples)
+    eps = np.finfo(np.float64).eps
     for i, percent in enumerate(args.data_percents):
         logging.info("\nRestoring parameters...")
         lgc.set_node_parameters(originalParams.clone(), set_circuit=True, reset_covariance=True)
@@ -194,22 +199,17 @@ if __name__ == '__main__':
         logging.info(f"Training circuit for {percent * 100} percent with {y.shape[0]} samples...")
         if args.regression:
             pl_start_t = perf_counter()
+            cv_params = args.cv_params
+            if cv_params is not None and "alpha_init_scale" in cv_params:
+                cv_params = cv_params.copy()
+                var = 1. / (np.var(train_data.labels.numpy()) + eps)
+                cv_params["alpha_init"] = [x * var for x in cv_params["alpha_init_scale"]]
+                cv_params.pop('alpha_init_scale', None)
+                logging.info(f"Using scaled alpha_init {cv_params['alpha_init']}")
+
             lgc.learn_parameters(
                 train_data, args.n_iter_pl, rand_gen=randState, solver=args.solver,
-                params={
-                    'scoreLL': True,
-                    'threshold_lambda': 1e100,
-                    # 'lambda_init': 0.1
-                },
-                #cv_params={
-                    # 'threshold_lambda': [1.e-4, 1.e-3, 1.e-2, 1.e-1, 1., 1.e+1, 1.e+2, 1.e+3, 1.e+4, 1.e+5, 1.e+6, 1.e+7],
-                #     # 'alpha_init': [1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, None],
-                #     # 'lambda_init': [0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000],
-                #     # 'alpha_1':  [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
-                #     # 'alpha_2':  [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
-                #     # 'lambda_1': [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
-                #     # 'lambda_2': [1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e+3, 1e+6, 1e+12],
-                #}
+                params=args.params, cv_params=cv_params
             )
             pl_end_t = perf_counter()
 
@@ -227,7 +227,8 @@ if __name__ == '__main__':
 
         else:
             pl_start_t = perf_counter()
-            lgc.learn_parameters(train_data, args.n_iter_pl, rand_gen=randState, solver=args.solver)
+            lgc.learn_parameters(train_data, args.n_iter_pl, rand_gen=randState, solver=args.solver,
+                                 params=args.params, cv_params=args.cv_params)
             pl_end_t = perf_counter()
 
             train_acc: float = lgc.calculate_accuracy(train_data)

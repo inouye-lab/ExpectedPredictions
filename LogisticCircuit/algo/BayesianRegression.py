@@ -17,13 +17,15 @@ from sklearn.utils.validation import _check_sample_weight
 from sklearn.utils.validation import _deprecate_positional_args
 
 
-def _gaussianLogLikelihood(x: np.ndarray, mean: np.ndarray, var: np.ndarray) -> np.ndarray:
-    """Evaluates the log likelihood for a gaussian distribution"""
+def _gaussianLogLikelihood(x: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    """Evaluates the log likelihood for a gaussian distribution, higher is better"""
+    var = std ** 2
     return -0.5 * np.log(2 * np.pi * var) \
         - 0.5 / var * ((x - mean) ** 2)
 
 ###############################################################################
 # BayesianRidge regression
+
 
 class BayesianRidge(RegressorMixin, LinearModel):
     """Bayesian ridge regression.
@@ -396,8 +398,10 @@ class BayesianRidge(RegressorMixin, LinearModel):
 
     def score(self, X, y, sample_weight=None):
         if self.scoreLL:
-            mean, var = self.predict(X, return_std=True)
-            return _gaussianLogLikelihood(y, mean, var).sum() / X.shape[0]
+            mean, std = self.predict(X, return_std=True)
+            return np.average(_gaussianLogLikelihood(y, mean, std))
+
+            # I probably do not need any of the following
             # TODO: do I need to preprocess and validate the data?
             # TODO: this does not work as the eigen values vector is the wrong size
             # if sample_weight is not None:
@@ -731,7 +735,7 @@ class ARDRegression(RegressorMixin, LinearModel):
 
     def score(self, X, y, sample_weight=None):
         if self.scoreLL:
-            mean, var = self.predict(X, return_std=True)
-            return _gaussianLogLikelihood(y, mean, var).sum() / X.shape[0]
+            mean, std = self.predict(X, return_std=True)
+            return np.average(_gaussianLogLikelihood(y, mean, std))
         else:
-            return super(RegressorMixin, self).score(X, y, sample_weight)
+            return super(ARDRegression, self).score(X, y, sample_weight)
