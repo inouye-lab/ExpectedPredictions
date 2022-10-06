@@ -216,19 +216,22 @@ class RegressionCircuit(BaseCircuit):
         if cv_params is not None:
             model = GridSearchCV(model, cv_params, cv=min(5, data.labels.shape[0]), n_jobs=num_cores)
 
-        print("About to fit model")
+        logging.info("About to fit model")
         model.fit(data.features, data.labels.numpy())
 
         # extract best model from grid search
         if cv_params is not None:
-            print("Best params: ", model.best_params_)
+            logging.info("Best params: " + str(model.best_params_))
             model = model.best_estimator_
 
         # bayesian variants store the covariance
         if solver in ('bayesian-ridge', 'bayesian-ard'):
             w, v = np.linalg.eig(model.sigma_)
-            print("Score:", model.score(data.features, data.labels.numpy()))
-            print("Covariance:", np.sum(w), np.shape(model.sigma_))
+            logging.info("Score: " + str(model.score(data.features, data.labels.numpy())))
+            logging.info("Covariance: " + str(np.sum(w)) + " " + str(np.shape(model.sigma_)))
+            logging.info("Alpha: " + str(model.alpha_))
+            logging.info("Alpha inv: " + str(1 / model.alpha_))
+            logging.info("Lambda: " + str(model.lambda_))
             self._covariance = [model.sigma_]
         # print('PARAMS', self._parameters.shape, model.coef_.shape)
 
