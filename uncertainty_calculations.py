@@ -223,6 +223,7 @@ def deltaInputVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, obsX: n
     @return  Input variance
     """
     lgc.zero_grad(False)
+    lgc.set_node_parameters(lgc.parameters)
     if mean is None:
         mean = Expectation(psdd, lgc, cache, obsX)
     secondMoment = moment(psdd, lgc, 2, cache, obsX)

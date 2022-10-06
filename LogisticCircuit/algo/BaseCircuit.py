@@ -465,7 +465,7 @@ class BaseCircuit(object):
     def calculate_error(self, data: DataSet) -> float:
         """Calculate accuracy given the learned parameters on the provided data."""
         y = self.predict_regression(data.features)
-        mse = mean_squared_error(data.labels, y)
+        mse = mean_squared_error(data.labels, y.detach())
         return mse
 
     @abstractmethod
