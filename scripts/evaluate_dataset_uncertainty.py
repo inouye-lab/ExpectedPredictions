@@ -120,6 +120,8 @@ if __name__ == '__main__':
                         help="Number of monte carlo samples")
     parser.add_argument("--benchmark_time",  action='store_true',
                         help="If set, disables batching on several methods to make the times more comparable")
+    parser.add_argument("--evaluate_validation",  action='store_true',
+                        help="If set, evaluates the validation dataset instead of the testing dataset. Used to validate against known data.")
 
     parser.add_argument("--seed", type=int, default=1337,
                         help="Seed for dataset selection")
@@ -184,9 +186,10 @@ if __name__ == '__main__':
     with gzip.open(args.data, 'rb') as f:
         rawData = pickle.load(f)
     # TODO: that might be the wrong dataset for evaluation
-    (trainingImages, trainingLabels), (images, labels), _ = rawData
-    validImages = images
-    validLabels = labels
+    (trainingImages, trainingLabels), (validImages, validLabels), (images, labels) = rawData
+    if args.evaluate_validation:
+        images = validImages
+        labels = validLabels
 
     logging.info("Loading PSDD..")
     psdd_vtree = PSDD_Vtree.read(VTREE_FILE)
