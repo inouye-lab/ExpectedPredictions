@@ -220,10 +220,10 @@ if __name__ == '__main__':
 
             logging.info(f"done learning in {pl_end_t - pl_start_t} secs")
             logging.info(f"\tcircuit size: {lgc.num_parameters}")
-            logging.info(f"\terror train: {train_acc:.5f}")
-            logging.info(f"\terror full train: {full_train_acc:.5f}")
-            logging.info(f"\terror test: {valid_err:.5f}")
-            logging.info(f"\terror valid: {test_err:.5f}")
+            logging.info(f"\terror train: {train_acc}")
+            logging.info(f"\terror full train: {full_train_acc}")
+            logging.info(f"\terror test: {valid_err}")
+            logging.info(f"\terror valid: {test_err}")
 
         else:
             pl_start_t = perf_counter()
@@ -238,10 +238,10 @@ if __name__ == '__main__':
 
             logging.info(f"done learning in {pl_end_t - pl_start_t} secs")
             logging.info(f"\tcircuit size: {lgc.num_parameters}")
-            logging.info(f"\taccuracy train: {train_acc:.5f}")
-            logging.info(f"\taccuracy full train: {full_train_acc:.5f}")
-            logging.info(f"\taccuracy test: {valid_err:.5f}")
-            logging.info(f"\taccuracy valid: {test_err:.5f}")
+            logging.info(f"\taccuracy train: {train_acc}")
+            logging.info(f"\taccuracy full train: {full_train_acc}")
+            logging.info(f"\taccuracy test: {valid_err}")
+            logging.info(f"\taccuracy valid: {test_err}")
 
         # save circuit
         circuitPath = circuitRoot + '/' + str(percent * 100) + 'percent.glc'
