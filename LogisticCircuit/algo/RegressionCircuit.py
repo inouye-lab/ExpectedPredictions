@@ -16,6 +16,7 @@ from sklearn.model_selection import GridSearchCV
 
 from .BaseCircuit import BaseCircuit
 from .BayesianRegression import BayesianRidge, ARDRegression
+from .PyroRegression import PyroBayesianRidge
 from ..structure.AndGate import AndGate, AndChildNode
 from ..structure.CircuitNode import OrGate, CircuitTerminal
 from ..structure.CircuitNode import LITERAL_IS_TRUE, LITERAL_IS_FALSE
@@ -198,6 +199,12 @@ class RegressionCircuit(BaseCircuit):
                 # random_state=rand_gen, TODO?
                 **params
             )
+        elif solver == 'pyro-ridge':
+            model = PyroBayesianRidge(
+                coef_init=self._parameters.detach(),
+                n_iter=num_iterations,
+                **params
+            )
         # default to ridge and pass along solver
         else:
             model = Ridge(
@@ -225,17 +232,19 @@ class RegressionCircuit(BaseCircuit):
             model = model.best_estimator_
 
         # bayesian variants store the covariance
-        if solver in ('bayesian-ridge', 'bayesian-ard'):
+        if solver in ('bayesian-ridge', 'bayesian-ard', 'pyro-ridge'):
             w, v = np.linalg.eig(model.sigma_)
             logging.info("Score: " + str(model.score(data.features, data.labels.numpy())))
             logging.info("Covariance: " + str(np.sum(w)) + " " + str(np.shape(model.sigma_)))
             logging.info("Alpha: " + str(model.alpha_))
             logging.info("Alpha inv: " + str(1 / model.alpha_))
-            logging.info("Lambda: " + str(model.lambda_))
+            if solver != 'pyro-ridge':
+                logging.info("Lambda: " + str(model.lambda_))
             self._covariance = [model.sigma_]
         # print('PARAMS', self._parameters.shape, model.coef_.shape)
 
         self._record_learned_parameters(model.coef_)
+
         gc.collect()
 
     def change_structure(self, data: DataSet, depth: int, num_splits: int, alpha: float) -> NoReturn:
