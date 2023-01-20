@@ -1,7 +1,7 @@
 import copy
 import numpy as np
 import torch
-from typing import Tuple, List, Optional, Union
+from typing import Tuple, List, Optional, Union, Any
 
 from torch import Tensor
 
@@ -17,6 +17,17 @@ import gc
 from sklearn.linear_model._logistic import (_joblib_parallel_args)
 from joblib import Parallel, delayed
 
+SummaryFunction = callable
+"""
+  Function to use to generate summary
+
+  @param dataset             The dataset used for the experiment
+  @param mean                Tensor of averages with a value per sample in the dataset
+  @param inputVariances      Tensor of input variances with a value per sample in the dataset
+  @param parameterVariances  Tensor of parameter variances with a value per sample in the dataset
+  @param totalVariances      Tensor of total variances with a value per sample in the dataset
+  @return  Any desired summary statistic
+"""
 
 SummaryType = Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]
 """
@@ -26,6 +37,12 @@ Result of an experiment, contains:
   avg input var, avg param var, avg total var,
   full mean vector, full input var vector, full param var vector
 """
+
+
+def orElse(value: Optional[Any], fallback):
+    if value is None:
+        return fallback
+    return value
 
 
 def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
@@ -88,6 +105,25 @@ def _summarize(dataset: DataSet, mean: torch.Tensor,
         mean, inputVariances, parameterVariances
 
 
+def computeResidualUncertainty(percent: float) -> SummaryFunction:
+    """
+    Creates a summary function that computes the residual uncertainty for the given percentage
+    @param percent  Confidence percent, used for selecting the uncertainty
+    """
+    # noinspection PyUnusedLocal
+    # Required to meet the signature for this function
+    def summaryFunction(dataset: DataSet, mean: torch.Tensor, inputVariances: torch.Tensor,
+                        parameterVariances: torch.Tensor, totalVariances: torch.Tensor) -> float:
+        mse = torch.pow(mean - dataset.labels, 2)
+        residual, _ = torch.sort(mse - totalVariances)
+        size = residual.shape[0]
+        selectedIndex = max(0, min(size - 1, int(residual.shape[0] * percent)))
+        return residual[selectedIndex].item()
+    return summaryFunction
+
+
+# noinspection PyUnusedLocal
+# Required to meet the signature for this function
 def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray,
                          y: torch.Tensor, i: int, params: MonteCarloParams) -> Tuple[Tensor, Tensor, Tensor]:
     """Evaluates a single iteration of the monte carlo method, used for parallel"""
@@ -101,45 +137,57 @@ def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray,
 
 
 def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, dataset: DataSet,
-                                    jobs: int = -1) -> SummaryType:
+                                    jobs: int = -1, summaryFunction: SummaryFunction = None,
+                                    residualUncertainty: float = 0) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset, used for time benchmark
-    @param psdd:      Probabilistic circuit root
-    @param lgc:       Logistic or regression circuit
-    @param dataset:   Dataset for computing the full value
-    @param params:    Parameters to use for estimates
-    @param jobs:       Max number of parallel jobs to run, use -1 to use the max possible
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param params:              Parameters to use for estimates
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, inputVariances, parameterVariances = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _monteCarloIteration, params)
-    totalVariances = parameterVariances + inputVariances
+    mean, inputVariances, parameterVariances = _baseParallelOverSamples(
+        psdd, lgc, dataset, jobs, _monteCarloIteration, params
+    )
+    totalVariances = parameterVariances + inputVariances + residualUncertainty
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariances, parameterVariances, totalVariances)
+    return orElse(summaryFunction, _summarize)(dataset, mean, inputVariances, parameterVariances, totalVariances)
 
 
 def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, dataset: DataSet,
-                                        jobs: int = -1) -> SummaryType:
+                                        jobs: int = -1, summaryFunction: SummaryFunction = None,
+                                        residualUncertainty: float = 0) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset,
     performing parallel over parameters and using torch to do parallel over inputs
-    @param psdd:      Probabilistic circuit root
-    @param lgc:       Logistic or regression circuit
-    @param dataset:   Dataset for computing the full value
-    @param params:    Parameters to use for estimates
-    @param jobs:       Max number of parallel jobs to run, use -1 to use the max possible
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param params:              Parameters to use for estimates
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
     # prepare parallel
-    mean, parameterVariances, inputVariances = monteCarloPredictionParallel(psdd, lgc, params, dataset.images, jobs=jobs)
-    totalVariances = parameterVariances + inputVariances
+    mean, parameterVariances, inputVariances = monteCarloPredictionParallel(
+        psdd, lgc, params, dataset.images, jobs=jobs
+    )
+    totalVariances = parameterVariances + inputVariances + residualUncertainty
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariances, parameterVariances, totalVariances)
+    return orElse(summaryFunction, _summarize)(dataset, mean, inputVariances, parameterVariances, totalVariances)
 
 
+# noinspection PyUnusedLocal
+# Required to meet the signature for this function
 def _deltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int,
                     computeInput: bool = False) -> Union[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor, Tensor]]:
     """Evaluates a single iteration of the delta method, used for parallel"""
@@ -157,14 +205,16 @@ def _deltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: to
     return mean, sampleParamVar
 
 
-def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1
-                               ) -> SummaryType:
+def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1,
+                               summaryFunction: SummaryFunction = None, residualUncertainty: float = 0) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset
-    @param psdd:    Probabilistic circuit root
-    @param lgc:     Logistic or regression circuit
-    @param dataset: Dataset for computing the full value
-    @param jobs:    Max number of parallel jobs to run, use -1 to use the max possible
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
@@ -173,13 +223,15 @@ def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSe
     # can easily batch input variance as we are not taking gradients there
     inputVariance, _ = deltaInputVariance(psdd, lgc, EVCache(), dataset.images)
     # add variances directly
-    inputVariance = torch.clamp(inputVariance, min=0)
-    totalVariance = inputVariance + paramVariance
+    inputVariance = torch.clamp(inputVariance, min=0).squeeze()
+    totalVariance = inputVariance + paramVariance + residualUncertainty
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariance, paramVariance, totalVariance)
+    return orElse(summaryFunction, _summarize)(dataset, mean, inputVariance, paramVariance, totalVariance)
 
 
+# noinspection PyUnusedLocal
+# Required to meet the signature for this function
 def _exactDeltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
                                  ) -> Tuple[Tensor, Tensor, Tensor]:
     """Evaluates a single iteration of the exact delta method, used for parallel"""
@@ -199,45 +251,64 @@ def _exactDeltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, 
     return mean, sampleParamVar, totalVariance
 
 
-def exactDeltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1) -> SummaryType:
+def exactDeltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1,
+                                    summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
+                                    ) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset
-    @param psdd:    Probabilistic circuit root
-    @param lgc:     Logistic or regression circuit
-    @param dataset: Dataset for computing the full value
-    @param jobs:    Max number of parallel jobs to run, use -1 to use the max possible
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, paramVariance, totalVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _exactDeltaIteration)
-    inputVariance = totalVariance - paramVariance
+    # residual uncertainty is added in later as we don't want that included as part of input or parameter
+    # thus, this variable has a bit of an odd name as we cannot canonically return total uncertainty
+    mean, paramVariance, inputParameterVariance = _baseParallelOverSamples(
+        psdd, lgc, dataset, jobs, _exactDeltaIteration
+    )
+    inputVariance = inputParameterVariance - paramVariance
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariance, paramVariance, totalVariance)
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, inputVariance, paramVariance, inputParameterVariance + residualUncertainty
+    )
 
 
 def monteCarloParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, params: MonteCarloParams,
-                                 dataset: DataSet, jobs = -1) -> SummaryType:
+                                 dataset: DataSet, jobs = -1, summaryFunction: SummaryFunction = None,
+                                 residualUncertainty: float = 0) -> SummaryType:
     """
     Baseline function to test the parameter variance using the monte carlo method without considering input variance.
     Missing values are handled through a training sample mean.
 
-    @param trainingSampleMean: Average value of each feature in the training data
-    @param lgc:                Circuit instance
-    @param dataset:            Dataset for computing the full value
-    @param params:             Parameters to use for estimates
-    @param jobs:    Max number of parallel jobs to run, use -1 to use the max possible
+    @param trainingSampleMean:  Average value of each feature in the training data
+    @param lgc:                 Circuit instance
+    @param dataset:             Dataset for computing the full value
+    @param params:              Parameters to use for estimates
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
     # prepare parallel
     mean, parameterVariances = uncertainty_baseline.monteCarloPredictionParallel(
-        trainingSampleMean, lgc, params, dataset.images, prefix='Baseline Param', jobs=jobs)
+        trainingSampleMean, lgc, params, dataset.images, prefix='Baseline Param', jobs=jobs
+    )
 
     gc.collect()
-    return _summarize(dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float), parameterVariances, parameterVariances)
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float), parameterVariances,
+        parameterVariances + residualUncertainty
+    )
 
 
+# noinspection PyUnusedLocal
+# Required to meet the signature for this function
 def _deltaParamIteration(ignored: None, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int,
                          trainingSampleMean: torch.Tensor) -> Tuple[Tensor, Tensor]:
     """Evaluates a single iteration of the delta method, used for parallel"""
@@ -251,59 +322,74 @@ def _deltaParamIteration(ignored: None, lgc: BaseCircuit, feature: np.ndarray, y
     return mean, sampleParamVar
 
 
-def deltaParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1):
+def deltaParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1,
+                            summaryFunction: SummaryFunction = None, residualUncertainty: float = 0) -> SummaryType:
     """
     Baseline function to test the parameter variance using the delta method without considering input variance.
     Missing values are handled through a training sample mean.
 
-    @param trainingSampleMean: Average value of each feature in the training data
-    @param lgc:                Circuit instance
-    @param dataset:            Dataset for computing the full value
-    @param jobs:               Max number of parallel jobs to run, use -1 to use the max possible
+    @param trainingSampleMean:  Average value of each feature in the training data
+    @param lgc:                 Circuit instance
+    @param dataset:             Dataset for computing the full value
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
     mean, paramVariance = _baseParallelOverSamples(None, lgc, dataset, jobs, _deltaParamIteration, trainingSampleMean)
 
     gc.collect()
-    return _summarize(dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float), paramVariance, paramVariance)
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float), paramVariance,
+        paramVariance + residualUncertainty
+    )
 
 
-def inputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet) -> SummaryType:
+def inputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, summaryFunction: SummaryFunction = None,
+                       residualUncertainty: float = 0) -> SummaryType:
     """
     Computes likelihood and input variances over the entire dataset
-    @param psdd:    Probabilistic circuit root
-    @param lgc:     Logistic or regression circuit
-    @param dataset: Dataset for computing the full value
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
     # delta method for input variance is already essentially the same as only considering input variance
     # difference is just the training method (and the fact delta normally gets param variance)
     inputVariance, mean = deltaInputVariance(psdd, lgc, EVCache(), dataset.images)
-    inputVariance = torch.clamp(inputVariance, min=0)
+    inputVariance = torch.clamp(inputVariance, min=0).squeeze()
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariance, torch.zeros(size=mean.shape, dtype=torch.float), inputVariance)
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, inputVariance, torch.zeros(size=mean.shape, dtype=torch.float),
+        inputVariance + residualUncertainty
+    )
 
 
-def deltaGaussianLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1
+def deltaGaussianLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1,
+                                            summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
                                             ) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset
-    @param psdd:    Probabilistic circuit root
-    @param lgc:     Logistic or regression circuit
-    @param dataset: Dataset for computing the full value
-    @param jobs:    Max number of parallel jobs to run, use -1 to use the max possible
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
     mean, paramVariance, inputVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaIteration, True)
     inputVariance = torch.clamp(inputVariance, min=0)
-    totalVariance = inputVariance + paramVariance
+    totalVariance = inputVariance + paramVariance + residualUncertainty
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariance, paramVariance, totalVariance)
+    return orElse(summaryFunction, _summarize)(dataset, mean, inputVariance, paramVariance, totalVariance)
 
 
 def _baselineInputIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
@@ -316,18 +402,25 @@ def _baselineInputIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarra
     return mean, inputVar
 
 
-def inputLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1) -> SummaryType:
+def inputLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1,
+                                    summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
+                                    ) -> SummaryType:
     """
     Computes likelihood and input variances over the entire dataset.
-    Unlike inputLogLikelihood, foregoes batching to make it more comparable to the other methods that do not support batching
-    @param psdd:    Probabilistic circuit root
-    @param lgc:     Logistic or regression circuit
-    @param dataset: Dataset for computing the full value
-    @param jobs:    Max number of parallel jobs to run, use -1 to use the max possible
+    Unlike inputLogLikelihood, foregoes batching to make it more comparable to other methods that don't support batching
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
     mean, inputVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _baselineInputIteration)
 
     gc.collect()
-    return _summarize(dataset, mean, inputVariance, torch.zeros(size=mean.shape, dtype=torch.float), inputVariance)
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, inputVariance, torch.zeros(size=mean.shape, dtype=torch.float),
+        inputVariance + residualUncertainty
+    )

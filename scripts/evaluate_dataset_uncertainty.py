@@ -35,7 +35,7 @@ from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
-    inputLogLikelihoodBenchmarkTime
+    inputLogLikelihoodBenchmarkTime, computeResidualUncertainty
 
 try:
     from time import perf_counter
@@ -59,8 +59,9 @@ class Result:
     inputVar: Tensor
     paramVar: Tensor
     totalVar: Tensor
+    residualUncertainty: float
 
-    def __init__(self, method: str, trainPercent: float, missingPercent: float,
+    def __init__(self, method: str, trainPercent: float, missingPercent: float, residualUncertainty: float,
                  totalError: Tensor,
                  inputLL: Tensor, paramLL: Tensor, totalLL: Tensor,
                  inputVar: Tensor, paramVar: Tensor, totalVar: Tensor):
@@ -76,6 +77,7 @@ class Result:
         self.inputVar = inputVar
         self.paramVar = paramVar
         self.totalVar = totalVar
+        self.residualUncertainty = residualUncertainty
 
         self.runtime = None
 
@@ -90,7 +92,7 @@ class Result:
             self.method, self.trainPercent, self.missingPercent,
             self.runtime, self.totalError.item(),
             self.inputLL.item(), self.paramLL.item(), self.totalLL.item(),
-            self.inputVar.item(), self.paramVar.item(), self.totalVar.item()
+            self.inputVar.item(), self.paramVar.item(), self.residualUncertainty, self.totalVar.item()
         ]
 
 
@@ -133,6 +135,9 @@ if __name__ == '__main__':
                         help="Location of folders for retrained models")
     parser.add_argument("--data_percents", type=float, nargs='*',
                         help="Percentages of the dataset to use in training")
+
+    parser.add_argument("--conformal_confidence", type=float, default=-1,
+                        help="Confidence level to use for conformal prediction")
 
     parser.add_argument('-v', '--verbose', type=int, nargs='?',
                         default=1,
@@ -185,11 +190,11 @@ if __name__ == '__main__':
     logging.info("Loading samples...")
     with gzip.open(args.data, 'rb') as f:
         rawData = pickle.load(f)
-    # TODO: that might be the wrong dataset for evaluation
-    (trainingImages, trainingLabels), (validImages, validLabels), (images, labels) = rawData
+    (trainingImages, trainingLabels), (validImages, validLabels), (testImages, testLabels) = rawData
+    # TODO: probably worth deleting these, was just for backwards compat with old experiments
     if args.evaluate_validation:
-        images = validImages
-        labels = validLabels
+        testImages = validImages
+        testLabels = validLabels
 
     logging.info("Loading PSDD..")
     psdd_vtree = PSDD_Vtree.read(VTREE_FILE)
@@ -197,22 +202,43 @@ if __name__ == '__main__':
     psdd = pypsdd.psdd_io.psdd_yitao_read(PSDD_FILE, manager)
     #################
 
+    # Stat datasets
+    validSamples = validImages.shape[0]
+    testSamples = testImages.shape[0]
+    variables = testImages.shape[1]
+    logging.info("Running {} dataset with {} validation and {} testing samples and {} variables".format(
+        args.model, validSamples, testSamples, variables
+    ))
+
     # populate missing datasets
     logging.info("Preparing missing datasets")
     randState = RandomState(args.seed)
-    testSets: List[Tuple[float, DataSet]] = []
-    samples = images.shape[0]
-    variables = images.shape[1]
+    testSets: List[Tuple[float, DataSet, Optional[DataSet]]] = []
     for missing in args.missing:
-        testImages = np.copy(images)
+        missingTestImages = np.copy(testImages)
+        # -1 is an internal value representing missing
         if args.global_missing_features:
             sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
-            testImages[:, sampleIndexes] = -1  # internal value representing missing
+            missingTestImages[:, sampleIndexes] = -1
         else:
-            for i in range(samples):
+            for i in range(testSamples):
                 sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
-                testImages[i, sampleIndexes] = -1  # internal value representing missing
-        testSets.append((missing, DataSet(testImages, labels, one_hot = False)))
+                missingTestImages[i, sampleIndexes] = -1
+
+        # only generate valid datasets if needed
+        missingValidImages = None
+        if args.conformal_confidence >= 0:
+            missingValidImages = np.copy(validImages)
+            if args.global_missing_features:
+                sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
+                missingValidImages[:, sampleIndexes] = -1
+            else:
+                for i in range(validSamples):
+                    sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
+                    missingValidImages[i, sampleIndexes] = -1
+            missingValidImages = DataSet(missingValidImages, validLabels, one_hot = False)
+
+        testSets.append((missing, DataSet(missingTestImages, testLabels, one_hot = False), missingValidImages))
 
     # first loop is over percents
     results: List[Result] = []
@@ -226,7 +252,7 @@ if __name__ == '__main__':
         "Name", "Train Percent", "Missing Percent",
         "Runtime", "Total Error",
         "Input LL", "Param LL", "Total LL",
-        "Input Var", "Param Var", "Total Var"
+        "Input Var", "Param Var", "Residual", "Total Var"
     ]
     resultsSummary.writerow(csvHeaders)
     allResults.writerow([
@@ -236,24 +262,51 @@ if __name__ == '__main__':
     resultsSummaryFile.flush()
     allResultsFile.flush()
 
+    # build conformal summary function if requested
+    # TODO: this might be backwards, current value means that n% of the dataset is at worst the computed number
+    # we may want n% of the dataset to be at best the computed number
+    residualUncertaintyFunction: Optional[callable] = None
+    if args.conformal_confidence >= 0:
+        residualUncertaintyFunction = computeResidualUncertainty(args.conformal_confidence)
+
     # all experiments follow a general form, so abstract that out a bit
     # Argument signature: experiment_function(*experiment_arguments, testSet)
     def run_experiment(name: str, trainPercent: float, experiment_function, *experiment_arguments,
                        zero_grad: bool = False):
-        for (missing, testSet) in testSets:
+        for (missing, testSet, validSet) in testSets:
             testSet: DataSet
+            validSet: Optional[DataSet]
             if zero_grad:
                 lgc.zero_grad(True)
 
             # print experiment header
-            logging.info("{}: Running {} at {}% training, {}% missing".format(args.model, name, trainPercent * 100, missing * 100))
+            logging.info("{}: Running {} at {}% training, {}% missing".format(
+                args.model, name, trainPercent * 100, missing * 100
+            ))
+
+            # find residual uncertainty
+            residualUncertainty: float = 0
+            residualRuntime = 0
+            if validSet is not None and residualUncertaintyFunction is not None:
+                start_t = perf_counter()
+                residualUncertainty = experiment_function(
+                    *experiment_arguments, validSet, summaryFunction=residualUncertaintyFunction
+                )
+                end_t = perf_counter()
+                residualRuntime = end_t - start_t
+                logging.info("{}: {} residual uncertainty at {}% training and {}% missing: {}. Took {}".format(
+                    args.model, name, percent * 100, missing * 100, residualUncertainty, residualRuntime
+                ))
 
             # run experiment
             start_t = perf_counter()
-            experiment_result: SummaryType = experiment_function(*experiment_arguments, testSet)
-            result = Result(name, trainPercent, missing, *experiment_result[0:7])
+            experiment_result: SummaryType = experiment_function(
+                *experiment_arguments, testSet, residualUncertainty=residualUncertainty
+            )
+            result = Result(name, trainPercent, missing, residualUncertainty, *experiment_result[0:7])
             end_t = perf_counter()
             result.runtime = end_t - start_t
+            result.residualRuntime = residualRuntime
             results.append(result)
 
             # save to CSV file
@@ -277,7 +330,7 @@ if __name__ == '__main__':
 
             # print progress
             result.print()
-            logging.info("{}: {} at {}% training and {}% missing took {}"
+            logging.info("{}: Uncertainty calculations {} at {}% training and {}% missing took {}"
                          .format(args.model, name, percent * 100, missing * 100, result.runtime))
             logging.info("----------------------------------------------------------------------------------------")
 
@@ -350,7 +403,7 @@ if __name__ == '__main__':
     allResultsFile.close()
 
     # results
-    formatStr = "{:<20} {:<15} {:<15} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20} {:<20}"
+    formatStr = "{:<20} {:<15} {:<15} {:<20} {:<20} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25}"
     # this is saved as a CSV, does not need to be in the log
     print(formatStr.format(*csvHeaders))
     print("")
