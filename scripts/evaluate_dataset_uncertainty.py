@@ -50,21 +50,26 @@ class Result:
     trainPercent: float
     missingPercent: float
     runtime: Optional[float]
-    totalError: Tensor
+    residualRuntime: Optional[float]
+    totalError: float
 
-    inputLL: Tensor
-    paramLL: Tensor
-    totalLL: Tensor
+    inputLL: float
+    paramLL: float
+    totalLL: float
 
-    inputVar: Tensor
-    paramVar: Tensor
-    totalVar: Tensor
+    inputVar: float
+    paramVar: float
+    totalVar: float
     residualUncertainty: float
 
+    ceNoResidual: float
+    ceResidual: float
+
     def __init__(self, method: str, trainPercent: float, missingPercent: float, residualUncertainty: float,
-                 totalError: Tensor,
-                 inputLL: Tensor, paramLL: Tensor, totalLL: Tensor,
-                 inputVar: Tensor, paramVar: Tensor, totalVar: Tensor):
+                 totalError: float,
+                 inputLL: float, paramLL: float, totalLL: float,
+                 inputVar: float, paramVar: float, totalVar: float,
+                 ceNoResidual: float, ceResidual: float):
         self.method = method
         self.trainPercent = trainPercent
         self.missingPercent = missingPercent
@@ -79,20 +84,25 @@ class Result:
         self.totalVar = totalVar
         self.residualUncertainty = residualUncertainty
 
+        self.ceNoResidual = ceNoResidual
+        self.ceResidual = ceResidual
+
         self.runtime = None
 
     def print(self):
         logging.info(f"{self.method} @ train {self.trainPercent}, missing {self.missingPercent}")
-        logging.info(f"    error: {self.totalError.item()}")
-        logging.info(f"    ll: input {self.inputLL.item()}, param {self.paramLL.item()}, total {self.totalLL.item()}")
-        logging.info(f"    var: input {self.inputVar.item()}, param {self.paramVar.item()}, total {self.totalVar.item()}")
+        logging.info(f"    error: {self.totalError}")
+        logging.info(f"    confidence error: w/o residual {self.ceNoResidual}, w/ residual {self.ceResidual}")
+        logging.info(f"    ll: input {self.inputLL}, param {self.paramLL}, total {self.totalLL}")
+        logging.info(f"    var: input {self.inputVar}, param {self.paramVar}, total {self.totalVar}")
 
     def getResultRow(self):
         return [
             self.method, self.trainPercent, self.missingPercent,
-            self.runtime, self.totalError.item(),
-            self.inputLL.item(), self.paramLL.item(), self.totalLL.item(),
-            self.inputVar.item(), self.paramVar.item(), self.residualUncertainty, self.totalVar.item()
+            self.runtime, self.totalError,
+            self.inputLL, self.paramLL, self.totalLL,
+            self.inputVar, self.paramVar, self.residualUncertainty, self.totalVar,
+            self.ceNoResidual, self.ceResidual
         ]
 
 
@@ -252,12 +262,14 @@ if __name__ == '__main__':
         "Name", "Train Percent", "Missing Percent",
         "Runtime", "MSE",
         "Input LL", "Param LL", "Total LL",
-        "Input Var", "Param Var", "Residual", "Total Var"
+        "Input Var", "Param Var", "Residual", "Total Var",
+        "CE w/o residual", "CE w/ residual"
     ]
     resultsSummary.writerow(csvHeaders)
     allResults.writerow([
         "Name", "Train Percent", "Missing Percent", "Sample Index",
-        "Expected", "Mean", "Input Variance", "Parameter Variance"
+        "Expected", "Mean", "Input Variance", "Parameter Variance",
+        "p-Value w/o Residual", "p-Value w/ Residual"
     ])
     resultsSummaryFile.flush()
     allResultsFile.flush()
@@ -303,7 +315,7 @@ if __name__ == '__main__':
             experiment_result: SummaryType = experiment_function(
                 *experiment_arguments, testSet, residualUncertainty=residualUncertainty
             )
-            result = Result(name, trainPercent, missing, residualUncertainty, *experiment_result[0:7])
+            result = Result(name, trainPercent, missing, residualUncertainty, *experiment_result[0:9])
             end_t = perf_counter()
             result.runtime = end_t - start_t
             result.residualRuntime = residualRuntime
@@ -313,11 +325,13 @@ if __name__ == '__main__':
             resultsSummary.writerow(result.getResultRow())
             resultsSummaryFile.flush()
             # save full results
-            mean, inputVariance, parameterVariance = experiment_result[7:10]
+            mean, inputVariance, parameterVariance, pValuesNoResidual, pValues = experiment_result[9:14]
             length = len(testSet.labels)
             assert len(mean) == length
             assert len(inputVariance) == length
             assert len(parameterVariance) == length
+            assert len(pValuesNoResidual) == length
+            assert len(pValues) == length
             for sample in range(length):
                 allResults.writerow([
                     name, trainPercent, missing, sample,
@@ -325,6 +339,8 @@ if __name__ == '__main__':
                     mean[sample].item(),
                     inputVariance[sample].item(),
                     parameterVariance[sample].item(),
+                    pValuesNoResidual[sample].item(),
+                    pValues[sample].item()
                 ])
             allResultsFile.flush()
 
@@ -403,7 +419,7 @@ if __name__ == '__main__':
     allResultsFile.close()
 
     # results
-    formatStr = "{:<20} {:<15} {:<15} {:<20} {:<20} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25}"
+    formatStr = "{:<20} {:<15} {:<15} {:<20} {:<20} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<20} {:<20}"
     # this is saved as a CSV, does not need to be in the log
     print(formatStr.format(*csvHeaders))
     print("")

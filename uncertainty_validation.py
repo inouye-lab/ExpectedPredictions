@@ -12,6 +12,7 @@ from LogisticCircuit.util.DataSet import DataSet
 from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
     monteCarloPrediction, MonteCarloParams, monteCarloPredictionParallel, exactDeltaTotalVariance
+from torch.distributions.normal import Normal
 
 import gc
 from sklearn.linear_model._logistic import (_joblib_parallel_args)
@@ -29,13 +30,20 @@ SummaryFunction = callable
   @return  Any desired summary statistic
 """
 
-SummaryType = Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]
+SummaryType = Tuple[
+    float,  # MSE
+    float, float, float,  # LL
+    float, float, float,  # Var
+    float, float,         # CE
+    Tensor, Tensor, Tensor, Tensor, Tensor
+]
 """
 Result of an experiment, contains:
   Total error,
   avg input LL, avg param LL, avg total LL,
   avg input var, avg param var, avg total var,
-  full mean vector, full input var vector, full param var vector
+  full mean vector, full input var vector, full param var vector,
+  full p-value vector ignoring residual, full p-value vector
 """
 
 
@@ -50,6 +58,19 @@ def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tenso
     clampVar = var.clamp(min=1e-10)
     return -0.5 * torch.log(torch.mul(2 * torch.pi, clampVar))\
         - 0.5 / clampVar * ((x - mean) ** 2)
+
+
+def _gaussianPValue(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
+    """Computes the p-values of the true value for all samples in the mean and variance vectors"""
+    normal = Normal(mean, torch.sqrt(var.clamp(min=1e-10)))
+    return 2 * normal.cdf(mean - torch.abs(mean - x))
+
+
+def _confidenceError(pValues: torch.Tensor) -> torch.Tensor:
+    """Computes the error between the ideal confidence values and the true one"""
+    sortedValues, _ = torch.sort(1 - pValues)
+    # the linspace represents the ideal value at each index, while sorted values are the actual value we got
+    return torch.mean(torch.abs(sortedValues - torch.linspace(0, 1, pValues.shape[0])))
 
 
 def _baseParallelOverSamples(psdd: Optional[PSddNode], lgc: BaseCircuit, dataset: DataSet, jobs: int, function, *args
@@ -97,12 +118,14 @@ def _summarize(dataset: DataSet, mean: torch.Tensor,
     inputLikelihood = _gaussianLogLikelihood(dataset.labels, mean, inputVariances)
     parameterLikelihood = _gaussianLogLikelihood(dataset.labels, mean, parameterVariances)
     totalLikelihood = _gaussianLogLikelihood(dataset.labels, mean, totalVariances)
+    noResidualPValues = _gaussianPValue(dataset.labels, mean, inputVariances + parameterVariances)
+    totalPValues = _gaussianPValue(dataset.labels, mean, totalVariances)
 
-    return torch.mean(error), torch.mean(inputLikelihood),\
-        torch.mean(parameterLikelihood), torch.mean(totalLikelihood), \
-        torch.mean(inputVariances), torch.mean(parameterVariances),\
-        torch.mean(totalVariances), \
-        mean, inputVariances, parameterVariances
+    return torch.mean(error).item(), torch.mean(inputLikelihood).item(),\
+        torch.mean(parameterLikelihood).item(), torch.mean(totalLikelihood).item(), \
+        torch.mean(inputVariances).item(), torch.mean(parameterVariances).item(), torch.mean(totalVariances).item(),\
+           _confidenceError(noResidualPValues).item(), _confidenceError(totalPValues).item(), \
+        mean, inputVariances, parameterVariances, noResidualPValues, totalPValues
 
 
 def computeResidualUncertainty(percent: float) -> SummaryFunction:
