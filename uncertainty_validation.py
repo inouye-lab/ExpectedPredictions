@@ -93,12 +93,12 @@ def _summarize(dataset: DataSet, mean: torch.Tensor,
     @param totalVariances      Tensor of total variances with a value per sample in the dataset
     @return  Total error, average loglikelihood for each variance, average variance
     """
-    error = torch.abs(mean - dataset.labels)
+    error = torch.pow(mean - dataset.labels, 2)
     inputLikelihood = _gaussianLogLikelihood(dataset.labels, mean, inputVariances)
     parameterLikelihood = _gaussianLogLikelihood(dataset.labels, mean, parameterVariances)
     totalLikelihood = _gaussianLogLikelihood(dataset.labels, mean, totalVariances)
 
-    return torch.sum(error), torch.mean(inputLikelihood),\
+    return torch.mean(error), torch.mean(inputLikelihood),\
         torch.mean(parameterLikelihood), torch.mean(totalLikelihood), \
         torch.mean(inputVariances), torch.mean(parameterVariances),\
         torch.mean(totalVariances), \

@@ -250,7 +250,7 @@ if __name__ == '__main__':
     allResults = csv.writer(allResultsFile)
     csvHeaders = [
         "Name", "Train Percent", "Missing Percent",
-        "Runtime", "Total Error",
+        "Runtime", "MSE",
         "Input LL", "Param LL", "Total LL",
         "Input Var", "Param Var", "Residual", "Total Var"
     ]
