@@ -363,11 +363,11 @@ if __name__ == '__main__':
         # second loop is over missing value counts
         if not args.skip_delta:
             method = deltaGaussianLogLikelihoodBenchmarkTime if args.benchmark_time else deltaGaussianLogLikelihood
-            run_experiment("Delta Method", percent, method, psdd, lgc, zero_grad=True)
+            run_experiment("Input + Delta", percent, method, psdd, lgc, zero_grad=True)
 
         # second loop is over missing value counts
         if not args.skip_delta and args.parameter_baseline:
-            run_experiment("BL Delta Param", percent, deltaParamLogLikelihood, trainingSampleMean, lgc, zero_grad=True)
+            run_experiment("Delta only", percent, deltaParamLogLikelihood, trainingSampleMean, lgc, zero_grad=True)
 
         # exact delta should be more accurate than regular delta
         if args.exact_delta:
@@ -377,13 +377,13 @@ if __name__ == '__main__':
 
         if args.input_baseline:
             method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
-            run_experiment("BL Input", percent, method, psdd, lgc)
+            run_experiment("Input only", percent, method, psdd, lgc)
 
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
         if args.samples > 1:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
             method = monteCarloGaussianLogLikelihood if args.benchmark_time else fastMonteCarloGaussianLogLikelihood
-            run_experiment("Monte Carlo", percent, method, psdd, lgc, params)
+            run_experiment("Input + MC {}".format(args.samples), percent, method, psdd, lgc, params)
 
         # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
         # have their values set to values from the current sample of the parameters. Most other methods assume the
@@ -395,7 +395,7 @@ if __name__ == '__main__':
 
         if args.parameter_baseline and args.samples > 0:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
-            run_experiment("BL MC Param", percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
+            run_experiment("MC {} only".format(args.samples), percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
         gc.collect()
 
