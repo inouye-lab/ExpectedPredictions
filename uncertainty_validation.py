@@ -14,8 +14,10 @@ from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVa
     monteCarloPrediction, MonteCarloParams, monteCarloPredictionParallel, exactDeltaTotalVariance
 from torch.distributions.normal import Normal
 
+import logging
 import gc
 from sklearn.linear_model._logistic import (_joblib_parallel_args)
+from scipy.stats import norm
 from joblib import Parallel, delayed
 
 SummaryFunction = callable
@@ -32,7 +34,7 @@ SummaryFunction = callable
 
 SummaryType = Tuple[
     float,  # MSE
-    float, float, float,  # LL
+    float, float, float, float,  # LL
     float, float, float,  # Var
     float, float,         # CE
     Tensor, Tensor, Tensor, Tensor, Tensor
@@ -117,31 +119,50 @@ def _summarize(dataset: DataSet, mean: torch.Tensor,
     error = torch.pow(mean - dataset.labels, 2)
     inputLikelihood = _gaussianLogLikelihood(dataset.labels, mean, inputVariances)
     parameterLikelihood = _gaussianLogLikelihood(dataset.labels, mean, parameterVariances)
+    noResidualLikelihood = _gaussianLogLikelihood(dataset.labels, mean, inputVariances + parameterVariances)
     totalLikelihood = _gaussianLogLikelihood(dataset.labels, mean, totalVariances)
     noResidualPValues = _gaussianPValue(dataset.labels, mean, inputVariances + parameterVariances)
     totalPValues = _gaussianPValue(dataset.labels, mean, totalVariances)
 
-    return torch.mean(error).item(), torch.mean(inputLikelihood).item(),\
-        torch.mean(parameterLikelihood).item(), torch.mean(totalLikelihood).item(), \
+    return torch.mean(error).item(), torch.mean(inputLikelihood).item(), torch.mean(parameterLikelihood).item(),\
+        torch.mean(noResidualLikelihood).item(), torch.mean(totalLikelihood).item(), \
         torch.mean(inputVariances).item(), torch.mean(parameterVariances).item(), torch.mean(totalVariances).item(),\
            _confidenceError(noResidualPValues).item(), _confidenceError(totalPValues).item(), \
         mean, inputVariances, parameterVariances, noResidualPValues, totalPValues
 
 
-def computeResidualUncertainty(percent: float) -> SummaryFunction:
+def computeResidualUncertainty(confidence: float) -> SummaryFunction:
     """
     Creates a summary function that computes the residual uncertainty for the given percentage
-    @param percent  Confidence percent, used for selecting the uncertainty
+    @param confidence  Confidence percent, used for selecting the uncertainty. Higher percents means larger intervals, meaning more values are accepted
     """
+    zValue = norm.ppf((confidence + 1) / 2)
+    logging.info("Computed zValue for {}% confidence is {}".format(confidence * 100, zValue))
+
     # noinspection PyUnusedLocal
     # Required to meet the signature for this function
     def summaryFunction(dataset: DataSet, mean: torch.Tensor, inputVariances: torch.Tensor,
                         parameterVariances: torch.Tensor, totalVariances: torch.Tensor) -> float:
-        mse = torch.pow(mean - dataset.labels, 2)
-        residual, _ = torch.sort(mse - totalVariances)
+        residual, _ = torch.sort(torch.abs(mean - dataset.labels) / zValue - torch.sqrt(totalVariances))
+        # if the value is negative, it is inside the confidence interval, while positive is outside
         size = residual.shape[0]
-        selectedIndex = max(0, min(size - 1, int(residual.shape[0] * percent)))
-        return residual[selectedIndex].item()
+
+        # travel confidence% of the way through the array, since these are sorted smallest to largest that will bw a
+        # number such that confidence% of the array is smaller
+        selectedIndex = max(0, min(size - 1, int(size * confidence)))
+        selectedResidual = residual[selectedIndex].item()
+        # noinspection PyTypeChecker
+        # ^ it returns a tensor of booleans
+        logging.info("Confidence changed from {}% to {}% using the residual {}".format(
+            torch.count_nonzero(residual < 0) * 100 / size,
+            torch.count_nonzero((residual - selectedResidual) < 0) * 100 / size,
+            selectedResidual
+        ))
+
+        # most of our math works in terms of variance instead of STD, so we need to square this
+        # however, we also need to ensure we keep the sign, did we overestimate or underestimate?
+        # TODO: should we instead square after summing the two? so (sqrt(totalVar) + residual)^2 ?
+        return selectedResidual * abs(selectedResidual)
     return summaryFunction
 
 
