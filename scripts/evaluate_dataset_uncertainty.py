@@ -154,6 +154,10 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', type=int, nargs='?',
                         default=1,
                         help='Verbosity level')
+    parser.add_argument("--log_results",  action='store_true',
+                        help="If set, results of the script are logged in tabular form after the script finishes"
+                             "executing. Redundant to the CSV file and requires more memory, but useful when running in"
+                             "an IDE.")
     #
     # parsing the args
     args = parser.parse_args()
@@ -263,7 +267,7 @@ if __name__ == '__main__':
     csvHeaders = [
         "Name", "Train Percent", "Missing Percent",
         "Runtime", "MSE",
-        "Input LL", "Param LL", "Input+Param ", "Total LL",
+        "Input LL", "Param LL", "Input+Param LL", "Total LL",
         "Input Var", "Param Var", "Residual", "Total Var",
         "CE w/o residual", "CE w/ residual"
     ]
@@ -277,7 +281,6 @@ if __name__ == '__main__':
     allResultsFile.flush()
 
     # build conformal summary function if requested
-    # TODO: this might be backwards, current value means that n% of the dataset is at worst the computed number
     # we may want n% of the dataset to be at best the computed number
     residualUncertaintyFunction: Optional[callable] = None
     if args.conformal_confidence >= 0:
@@ -321,7 +324,8 @@ if __name__ == '__main__':
             end_t = perf_counter()
             result.runtime = end_t - start_t
             result.residualRuntime = residualRuntime
-            results.append(result)
+            if args.log_results:
+                results.append(result)
 
             # save to CSV file
             resultsSummary.writerow(result.getResultRow())
@@ -421,10 +425,15 @@ if __name__ == '__main__':
     allResultsFile.close()
 
     # results
-    formatStr = "{:<20} {:<15} {:<15} {:<20} {:<20} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<25} {:<20} {:<20}"
-    # this is saved as a CSV, does not need to be in the log
-    print(formatStr.format(*csvHeaders))
-    print("")
-    for result in results:
+    if args.log_results:
+        formatStr = "{:<20} {:<15} {:<15} " \
+                    "{:<20} {:<20} " \
+                    "{:<25} {:<25} {:<25} {:<25} " \
+                    "{:<25} {:<25} {:<25} {:<25} " \
+                    "{:<20} {:<20}"
         # this is saved as a CSV, does not need to be in the log
-        print(formatStr.format(*result.getResultRow()))
+        print(formatStr.format(*csvHeaders))
+        print("")
+        for result in results:
+            # this is saved as a CSV, does not need to be in the log
+            print(formatStr.format(*result.getResultRow()))
