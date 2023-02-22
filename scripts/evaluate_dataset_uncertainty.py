@@ -36,7 +36,7 @@ from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussia
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
     inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, basicExpectation, basicMeanImputation, \
-    computeMSEResidualUncertainty
+    computeMSEResidualUncertainty, ignoreInputUncertainty, deltaNoInputLogLikelihood
 
 try:
     from time import perf_counter
@@ -398,6 +398,7 @@ if __name__ == '__main__':
             method = deltaGaussianLogLikelihoodBenchmarkTime if args.benchmark_time else deltaGaussianLogLikelihood
             run_experiment("Input + Delta", percent, method, psdd, lgc, zero_grad=True)
             if args.parameter_baseline:
+                run_experiment("Expectation + Delta", percent, deltaNoInputLogLikelihood, psdd, lgc, zero_grad=True)
                 run_experiment("Imputation + Delta", percent, deltaParamLogLikelihood, trainingSampleMean, lgc, zero_grad=True)
 
         # exact delta should be more accurate than regular delta
@@ -419,6 +420,8 @@ if __name__ == '__main__':
             method = monteCarloGaussianLogLikelihood if args.benchmark_time else fastMonteCarloGaussianLogLikelihood
             run_experiment("Input + MC {}".format(args.samples), percent, method, psdd, lgc, params)
             if args.parameter_baseline:
+                # Alternative parameter baseline, just ignores input uncertainty without mean imputation
+                run_experiment("Expectation + MC {}".format(args.samples), percent, ignoreInputUncertainty(method), psdd, lgc, params)
                 # Standard baseline with mean imputation
                 run_experiment("Imputation + MC {}".format(args.samples), percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 

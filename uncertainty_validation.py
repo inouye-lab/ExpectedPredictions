@@ -177,6 +177,28 @@ def computeMSEResidualUncertainty(dataset: DataSet, mean: torch.Tensor, inputVar
     return torch.mean(torch.pow(mean - dataset.labels, 2) - totalVariances).item()
 
 
+def _ignoreInputUncertaintySummary(originalFunction: callable) -> callable:
+    if originalFunction is None:
+        originalFunction = _summarize
+    def summaryFunction(dataset: DataSet, mean: torch.Tensor, inputVariances: torch.Tensor,
+                        parameterVariances: torch.Tensor, totalVariances: torch.Tensor):
+        return originalFunction(
+            dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float),
+            parameterVariances, totalVariances - inputVariances
+        )
+    return summaryFunction
+
+
+def ignoreInputUncertainty(originalFunction: callable) -> callable:
+    """
+    Wraps the experiment function in order to wrap the summary function to ignore input uncertainty
+    """
+    def experimentFunction(*unnamed, summaryFunction: SummaryFunction = None, **named) -> SummaryType:
+        return originalFunction(*unnamed, summaryFunction=_ignoreInputUncertaintySummary(summaryFunction), **named)
+
+    return experimentFunction
+
+
 # noinspection PyUnusedLocal
 # Required to meet the signature for this function
 def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray,
@@ -283,6 +305,28 @@ def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSe
 
     gc.collect()
     return orElse(summaryFunction, _summarize)(dataset, mean, inputVariance, paramVariance, totalVariance)
+
+
+def deltaNoInputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1,
+                               summaryFunction: SummaryFunction = None, residualUncertainty: float = 0) -> SummaryType:
+    """
+    Computes likelihood and variances over the entire dataset
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+    mean, paramVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaIteration)
+
+    gc.collect()
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, torch.zeros(size=mean.shape, dtype=torch.float),
+        paramVariance, paramVariance + residualUncertainty
+    )
 
 
 # noinspection PyUnusedLocal
