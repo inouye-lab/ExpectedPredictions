@@ -150,6 +150,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--conformal_confidence", type=float, default=-1,
                         help="Confidence level to use for conformal prediction")
+    parser.add_argument("--residual_missingness",  action='store_true',
+                        help="If set, uses missing values for residual. If unset, residual is calculated without missing values")
 
     parser.add_argument('-v', '--verbose', type=int, nargs='?',
                         default=1,
@@ -243,7 +245,7 @@ if __name__ == '__main__':
 
         # only generate valid datasets if needed
         missingValidImages = None
-        if args.conformal_confidence >= 0:
+        if args.residual_missingness:
             missingValidImages = np.copy(validImages)
             if args.global_missing_features:
                 sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
@@ -255,6 +257,7 @@ if __name__ == '__main__':
             missingValidImages = DataSet(missingValidImages, validLabels, one_hot = False)
 
         testSets.append((missing, DataSet(missingTestImages, testLabels, one_hot = False), missingValidImages))
+    pureValidSet = DataSet(validImages, validLabels, one_hot=False)
 
     # first loop is over percents
     results: List[Result] = []
@@ -304,10 +307,11 @@ if __name__ == '__main__':
             # find residual uncertainty
             residualUncertainty: float = 0
             residualRuntime = 0
-            if validSet is not None and residualUncertaintyFunction is not None:
+            if residualUncertaintyFunction is not None:
+                dataset = validSet if validSet is not None else pureValidSet
                 start_t = perf_counter()
                 residualUncertainty = experiment_function(
-                    *experiment_arguments, validSet, summaryFunction=residualUncertaintyFunction
+                    *experiment_arguments, dataset=dataset, summaryFunction=residualUncertaintyFunction
                 )
                 end_t = perf_counter()
                 residualRuntime = end_t - start_t
@@ -318,7 +322,7 @@ if __name__ == '__main__':
             # run experiment
             start_t = perf_counter()
             experiment_result: SummaryType = experiment_function(
-                *experiment_arguments, testSet, residualUncertainty=residualUncertainty
+                *experiment_arguments, dataset=testSet, residualUncertainty=residualUncertainty
             )
             result = Result(name, trainPercent, missing, residualUncertainty, *experiment_result[0:10])
             end_t = perf_counter()
