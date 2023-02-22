@@ -35,7 +35,7 @@ from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
-    inputLogLikelihoodBenchmarkTime, computeResidualUncertainty
+    inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, computeMSEResidualUncertainty
 
 try:
     from time import perf_counter
@@ -148,6 +148,8 @@ if __name__ == '__main__':
     parser.add_argument("--data_percents", type=float, nargs='*',
                         help="Percentages of the dataset to use in training")
 
+    parser.add_argument("--mse_residual",  action='store_true',
+                        help="If set, uses the MSE method to compute residual uncertainty")
     parser.add_argument("--conformal_confidence", type=float, default=-1,
                         help="Confidence level to use for conformal prediction")
     parser.add_argument("--residual_missingness",  action='store_true',
@@ -286,8 +288,10 @@ if __name__ == '__main__':
     # build conformal summary function if requested
     # we may want n% of the dataset to be at best the computed number
     residualUncertaintyFunction: Optional[callable] = None
-    if args.conformal_confidence >= 0:
-        residualUncertaintyFunction = computeResidualUncertainty(args.conformal_confidence)
+    if args.mse_residual:
+        residualUncertaintyFunction = computeMSEResidualUncertainty
+    elif args.conformal_confidence >= 0:
+        residualUncertaintyFunction = computeConfidenceResidualUncertainty(args.conformal_confidence)
 
     # all experiments follow a general form, so abstract that out a bit
     # Argument signature: experiment_function(*experiment_arguments, testSet)

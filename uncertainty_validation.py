@@ -131,7 +131,7 @@ def _summarize(dataset: DataSet, mean: torch.Tensor,
         mean, inputVariances, parameterVariances, noResidualPValues, totalPValues
 
 
-def computeResidualUncertainty(confidence: float) -> SummaryFunction:
+def computeConfidenceResidualUncertainty(confidence: float) -> SummaryFunction:
     """
     Creates a summary function that computes the residual uncertainty for the given percentage
     @param confidence  Confidence percent, used for selecting the uncertainty. Higher percents means larger intervals, meaning more values are accepted
@@ -164,6 +164,16 @@ def computeResidualUncertainty(confidence: float) -> SummaryFunction:
         # TODO: should we instead square after summing the two? so (sqrt(totalVar) + residual)^2 ?
         return selectedResidual * abs(selectedResidual)
     return summaryFunction
+
+
+# noinspection PyUnusedLocal
+# Required to meet the signature for this function
+def computeMSEResidualUncertainty(dataset: DataSet, mean: torch.Tensor, inputVariances: torch.Tensor,
+                                  parameterVariances: torch.Tensor, totalVariances: torch.Tensor) -> float:
+    """
+    Computes residual uncertainty using the MSE method, which is an approximation of the MLE estimator of residual
+    """
+    return torch.mean(torch.pow(mean - dataset.labels, 2) - totalVariances).item()
 
 
 # noinspection PyUnusedLocal
