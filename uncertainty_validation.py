@@ -9,6 +9,7 @@ import uncertainty_baseline
 from EVCache import EVCache
 from LogisticCircuit.algo.BaseCircuit import BaseCircuit
 from LogisticCircuit.util.DataSet import DataSet
+from circuit_expect import Expectation
 from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
     monteCarloPrediction, MonteCarloParams, monteCarloPredictionParallel, exactDeltaTotalVariance
@@ -422,6 +423,59 @@ def inputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, summa
         dataset, mean, inputVariance, torch.zeros(size=mean.shape, dtype=torch.float),
         inputVariance + residualUncertainty
     )
+
+
+def basicExpectation(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, summaryFunction: SummaryFunction = None,
+                     residualUncertainty: float = 0, inputUncertainty: torch.Tensor = None) -> SummaryType:
+    """
+    Computes likelihood and input variances over the entire dataset
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
+    @param inputUncertainty:    Input uncertainty from residual method
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+    # even more stripped down delta method, we don't even compute variance anymore here
+    mean = Expectation(psdd, lgc, EVCache(), dataset.images).squeeze()
+    variance = torch.zeros(size=mean.shape, dtype=torch.float)
+    if inputUncertainty is None:
+        inputUncertainty = variance
+
+    gc.collect()
+    return orElse(summaryFunction, _summarize)(dataset, mean, inputUncertainty, variance, inputUncertainty + residualUncertainty)
+
+
+def basicMeanImputation(trainingSampleMean: np.ndarray, lgc: BaseCircuit, dataset: DataSet,
+                        summaryFunction: SummaryFunction = None, residualUncertainty: float = 0,
+                        inputUncertainty: torch.Tensor = None) -> SummaryType:
+    """
+    Computes likelihood and input variances over the entire dataset
+    @param trainingSampleMean:  Mean for imputation
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
+    @param inputUncertainty:    Input uncertainty from residual method
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+
+    obsX = dataset.images.copy()
+    for i in range(trainingSampleMean.shape[0]):
+        # anywhere we see a -1 (missing), substitute in the training sample mean for that feature
+        obsX[obsX[:, i] == -1, i] = trainingSampleMean[i]
+    features = lgc.calculate_features(obsX)
+    mean = torch.mm(torch.from_numpy(features), lgc.parameters.T).squeeze()
+    variance = torch.zeros(size=mean.shape, dtype=torch.float)
+    if inputUncertainty is None:
+        inputUncertainty = variance
+
+    gc.collect()
+    return orElse(summaryFunction, _summarize)(dataset, mean, inputUncertainty, variance,
+                                               inputUncertainty + residualUncertainty)
 
 
 def deltaGaussianLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, jobs: int = -1,

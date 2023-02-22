@@ -35,7 +35,8 @@ from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
-    inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, computeMSEResidualUncertainty
+    inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, basicExpectation, basicMeanImputation, \
+    computeMSEResidualUncertainty
 
 try:
     from time import perf_counter
@@ -136,6 +137,8 @@ if __name__ == '__main__':
                         help="If set, disables batching on several methods to make the times more comparable")
     parser.add_argument("--evaluate_validation",  action='store_true',
                         help="If set, evaluates the validation dataset instead of the testing dataset. Used to validate against known data.")
+    parser.add_argument("--include_trivial",  action='store_true',
+                        help="If set, runs the trivial methods that do not compute uncertainty, only residual")
 
     parser.add_argument("--seed", type=int, default=1337,
                         help="Seed for dataset selection")
@@ -387,17 +390,15 @@ if __name__ == '__main__':
 
         # sample the training sample mean from the same set of images we use for evaluation
         # will be a bit more accurate to what we can actually produce as far as missing value imputation
-        if args.parameter_baseline:
+        if args.parameter_baseline or args.include_trivial:
             trainingSampleMean = np.mean(trainingData.images, axis=0)
 
         # second loop is over missing value counts
         if not args.skip_delta:
             method = deltaGaussianLogLikelihoodBenchmarkTime if args.benchmark_time else deltaGaussianLogLikelihood
             run_experiment("Input + Delta", percent, method, psdd, lgc, zero_grad=True)
-
-        # second loop is over missing value counts
-        if not args.skip_delta and args.parameter_baseline:
-            run_experiment("Delta only", percent, deltaParamLogLikelihood, trainingSampleMean, lgc, zero_grad=True)
+            if args.parameter_baseline:
+                run_experiment("Imputation + Delta", percent, deltaParamLogLikelihood, trainingSampleMean, lgc, zero_grad=True)
 
         # exact delta should be more accurate than regular delta
         if args.exact_delta:
@@ -405,6 +406,9 @@ if __name__ == '__main__':
 
         lgc.zero_grad(False)
 
+        if args.include_trivial:
+            run_experiment("Mean Imputation", percent, basicMeanImputation, trainingSampleMean, lgc)
+            run_experiment("Expectation", percent, basicExpectation, psdd, lgc)
         if args.input_baseline:
             method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
             run_experiment("Input only", percent, method, psdd, lgc)
@@ -414,6 +418,9 @@ if __name__ == '__main__':
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
             method = monteCarloGaussianLogLikelihood if args.benchmark_time else fastMonteCarloGaussianLogLikelihood
             run_experiment("Input + MC {}".format(args.samples), percent, method, psdd, lgc, params)
+            if args.parameter_baseline:
+                # Standard baseline with mean imputation
+                run_experiment("Imputation + MC {}".format(args.samples), percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
         # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
         # have their values set to values from the current sample of the parameters. Most other methods assume the
@@ -422,10 +429,6 @@ if __name__ == '__main__':
 
         # We could of course reset the parameters after each trial to the mean value, but it did not seem necessary,
         # sorting the test is simpler and makes the experiments run slightly faster.
-
-        if args.parameter_baseline and args.samples > 0:
-            params = sampleMonteCarloParameters(lgc, args.samples, randState)
-            run_experiment("MC {} only".format(args.samples), percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
         gc.collect()
 
