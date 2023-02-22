@@ -36,7 +36,7 @@ from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussia
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
     inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, basicExpectation, basicMeanImputation, \
-    computeMSEResidualUncertainty, ignoreInputUncertainty, deltaNoInputLogLikelihood
+    computeMSEResidualUncertainty, ignoreInputUncertainty, deltaNoInputLogLikelihood, residualPerSampleInput
 
 try:
     from time import perf_counter
@@ -139,6 +139,8 @@ if __name__ == '__main__':
                         help="If set, evaluates the validation dataset instead of the testing dataset. Used to validate against known data.")
     parser.add_argument("--include_trivial",  action='store_true',
                         help="If set, runs the trivial methods that do not compute uncertainty, only residual")
+    parser.add_argument("--include_residual_input",  action='store_true',
+                        help="If set, runs the residual input method for trivial methods")
 
     parser.add_argument("--seed", type=int, default=1337,
                         help="Seed for dataset selection")
@@ -390,7 +392,7 @@ if __name__ == '__main__':
 
         # sample the training sample mean from the same set of images we use for evaluation
         # will be a bit more accurate to what we can actually produce as far as missing value imputation
-        if args.parameter_baseline or args.include_trivial:
+        if args.parameter_baseline or args.include_trivial or args.include_residual_input:
             trainingSampleMean = np.mean(trainingData.images, axis=0)
 
         # second loop is over missing value counts
@@ -410,6 +412,14 @@ if __name__ == '__main__':
         if args.include_trivial:
             run_experiment("Mean Imputation", percent, basicMeanImputation, trainingSampleMean, lgc)
             run_experiment("Expectation", percent, basicExpectation, psdd, lgc)
+        if args.include_residual_input:
+            run_experiment("Imputation + Residual", percent,
+                           residualPerSampleInput, pureValidSet,
+                           basicMeanImputation, trainingSampleMean, lgc)
+            run_experiment("Expectation + Residual", percent,
+                           residualPerSampleInput, pureValidSet,
+                           basicExpectation, psdd, lgc)
+
         if args.input_baseline:
             method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
             run_experiment("Input only", percent, method, psdd, lgc)

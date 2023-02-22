@@ -576,3 +576,46 @@ def inputLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: D
         dataset, mean, inputVariance, torch.zeros(size=mean.shape, dtype=torch.float),
         inputVariance + residualUncertainty
     )
+
+
+def _residualInputUncertainty(ignored1: None, ignored2: None, feature: np.ndarray, y: torch.Tensor, i: int,
+                              validationData: DataSet, residualUncertainty: float,
+                              experiment_function, *experiment_arguments) -> Tuple[float, float]:
+    # make the same features missing
+    print(f"Evaluating residual input for sample {i}", end='\r')
+    validationImages = np.copy(validationData.images)
+    validationImages[:, feature == -1] = -1
+    return experiment_function(
+        *experiment_arguments,
+        dataset=DataSet(validationImages, validationData.labels.numpy(), one_hot=validationData.one_hot_labels),
+        residualUncertainty=residualUncertainty,
+        summaryFunction=computeMSEResidualUncertainty
+    ), 0
+
+
+def residualPerSampleInput(validationData: DataSet, experiment_function, *experiment_arguments, dataset: DataSet = None,
+                           jobs: int = -1, summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
+                           ) -> SummaryType:
+    # first step: compute input uncertainty using the method
+    # not parallel as the method might be parallel, can it be parallel?
+    # count = dataset.labels.size()
+    # inputUncertainty = torch.zeros(size=(count,), dtype=torch.float)
+    # for i in range(dataset.labels.size()):
+    #     validationImages = np.copy(validationData.images)
+    #     validationImages[:, dataset.images[i, :].squeeze() == -1] = -1
+    #     inputDataset = DataSet(validationImages, dataset.labels, one_hot=dataset.one_hot_labels)
+    #     inputUncertainty[i] = experiment_function(
+    #         *experiment_arguments, dataset=inputDataset, residualUncertainty=residualUncertainty,
+    #         summaryFunction=computeMSEResidualUncertainty
+    #     )
+    inputUncertainty = None
+    if summaryFunction is None:
+        inputUncertainty, _ = _baseParallelOverSamples(
+            None, None, dataset, jobs, _residualInputUncertainty, validationData, residualUncertainty,
+            experiment_function, *experiment_arguments
+        )
+
+    return experiment_function(
+        *experiment_arguments, dataset=dataset, residualUncertainty=residualUncertainty,
+        inputUncertainty=inputUncertainty, summaryFunction=summaryFunction
+    )
