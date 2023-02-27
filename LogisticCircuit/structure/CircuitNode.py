@@ -60,7 +60,7 @@ class CircuitNode(object):
         self._prob = value
 
     @staticmethod
-    def _safe_log(arr) -> np.ndarray:
+    def _safe_log(arr: np.ndarray) -> np.ndarray:
         log_values = np.zeros(arr.shape)
         LOG_ZERO = -10000
         log_values.fill(LOG_ZERO)
@@ -136,6 +136,8 @@ class CircuitTerminal(CircuitNode):
     _var_index: int
     _var_value: int
     _parameter: torch.Tensor
+    _feature: np.ndarray
+    _prob: np.ndarray
 
     def __init__(self, index: int, vtree: Vtree, var_index: int, var_value: int, parameter: torch.Tensor = None):
         super().__init__(index, vtree)

@@ -1,7 +1,7 @@
 import copy
 import numpy as np
 import torch
-from typing import Tuple, List, Optional, Union, Any
+from typing import Tuple, Union
 
 from torch import Tensor
 
@@ -13,13 +13,12 @@ from circuit_expect import Expectation
 from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
     monteCarloPrediction, MonteCarloParams, monteCarloPredictionParallel, exactDeltaTotalVariance
-from torch.distributions.normal import Normal
+from uncertainty_utils import orElse, gaussianLogLikelihood, gaussianPValue, confidenceError, \
+    parallelOverSamples
 
 import logging
 import gc
-from sklearn.linear_model._logistic import (_joblib_parallel_args)
 from scipy.stats import norm
-from joblib import Parallel, delayed
 
 SummaryFunction = callable
 """
@@ -50,60 +49,6 @@ Result of an experiment, contains:
 """
 
 
-def orElse(value: Optional[Any], fallback):
-    if value is None:
-        return fallback
-    return value
-
-
-def _gaussianLogLikelihood(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
-    """Evaluates the log likelihood for a gaussian distribution"""
-    clampVar = var.clamp(min=1e-10)
-    return -0.5 * torch.log(torch.mul(2 * torch.pi, clampVar))\
-        - 0.5 / clampVar * ((x - mean) ** 2)
-
-
-def _gaussianPValue(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
-    """Computes the p-values of the true value for all samples in the mean and variance vectors"""
-    normal = Normal(mean, torch.sqrt(var.clamp(min=1e-10)))
-    return 2 * normal.cdf(mean - torch.abs(mean - x))
-
-
-def _confidenceError(pValues: torch.Tensor) -> torch.Tensor:
-    """Computes the error between the ideal confidence values and the true one"""
-    sortedValues, _ = torch.sort(1 - pValues)
-    # the linspace represents the ideal value at each index, while sorted values are the actual value we got
-    return torch.mean(torch.abs(sortedValues - torch.linspace(0, 1, pValues.shape[0])))
-
-
-def _baseParallelOverSamples(psdd: Optional[PSddNode], lgc: BaseCircuit, dataset: DataSet, jobs: int, function, *args
-                             ) -> List[Tensor]:
-    """
-    Shared logic between any method that parallels over count
-    @param psdd:      Probabilistic circuit root
-    @param lgc:       Logistic or regression circuit
-    @param dataset:   Dataset for computing the full value
-    @param jobs:      Max number of parallel jobs to run, use -1 to use the max possible
-    @param function:  Parallel function to run, handles the actual LL computation
-    @param args:      Extra arguments to pass into the function
-    @return  Tuple of function returns
-    """
-    count = dataset.labels.size()[0]
-
-    # prepare parallel
-    delayedFunc = delayed(function)
-    result = Parallel(n_jobs=jobs,
-                      **_joblib_parallel_args(prefer='processes'))(
-        delayedFunc(psdd, lgc, dataset.images[i, :], dataset.labels[i], i, *args)
-        for i in range(count)
-    )
-    resultTensors: List[Optional[torch.Tensor]] = [None]*len(result[0])
-    for i, result in enumerate(zip(*result)):
-        resultTensors[i] = torch.tensor(result)
-    gc.collect()
-    return resultTensors
-
-
 def _summarize(dataset: DataSet, mean: torch.Tensor,
                inputVariances: torch.Tensor, parameterVariances: torch.Tensor, totalVariances: torch.Tensor
                ) -> SummaryType:
@@ -118,18 +63,18 @@ def _summarize(dataset: DataSet, mean: torch.Tensor,
     @return  Total error, average loglikelihood for each variance, average variance
     """
     error = torch.pow(mean - dataset.labels, 2)
-    inputLikelihood = _gaussianLogLikelihood(dataset.labels, mean, inputVariances)
-    parameterLikelihood = _gaussianLogLikelihood(dataset.labels, mean, parameterVariances)
-    noResidualLikelihood = _gaussianLogLikelihood(dataset.labels, mean, inputVariances + parameterVariances)
-    totalLikelihood = _gaussianLogLikelihood(dataset.labels, mean, totalVariances)
-    noResidualPValues = _gaussianPValue(dataset.labels, mean, inputVariances + parameterVariances)
-    totalPValues = _gaussianPValue(dataset.labels, mean, totalVariances)
+    inputLikelihood = gaussianLogLikelihood(dataset.labels, mean, inputVariances)
+    parameterLikelihood = gaussianLogLikelihood(dataset.labels, mean, parameterVariances)
+    noResidualLikelihood = gaussianLogLikelihood(dataset.labels, mean, inputVariances + parameterVariances)
+    totalLikelihood = gaussianLogLikelihood(dataset.labels, mean, totalVariances)
+    noResidualPValues = gaussianPValue(dataset.labels, mean, inputVariances + parameterVariances)
+    totalPValues = gaussianPValue(dataset.labels, mean, totalVariances)
 
-    return torch.mean(error).item(), torch.mean(inputLikelihood).item(), torch.mean(parameterLikelihood).item(),\
-        torch.mean(noResidualLikelihood).item(), torch.mean(totalLikelihood).item(), \
-        torch.mean(inputVariances).item(), torch.mean(parameterVariances).item(), torch.mean(totalVariances).item(),\
-           _confidenceError(noResidualPValues).item(), _confidenceError(totalPValues).item(), \
-        mean, inputVariances, parameterVariances, noResidualPValues, totalPValues
+    return torch.mean(error).item(), torch.mean(inputLikelihood).item(), torch.mean(parameterLikelihood).item(), \
+           torch.mean(noResidualLikelihood).item(), torch.mean(totalLikelihood).item(), \
+           torch.mean(inputVariances).item(), torch.mean(parameterVariances).item(), torch.mean(totalVariances).item(), \
+           confidenceError(noResidualPValues).item(), confidenceError(totalPValues).item(), \
+           mean, inputVariances, parameterVariances, noResidualPValues, totalPValues
 
 
 def computeConfidenceResidualUncertainty(confidence: float) -> SummaryFunction:
@@ -179,8 +124,8 @@ def computeMSEResidualUncertainty(dataset: DataSet, mean: torch.Tensor, inputVar
 
 # noinspection PyUnusedLocal
 # Required to meet the signature for this function
-def _monteCarloIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray,
-                         y: torch.Tensor, i: int, params: MonteCarloParams) -> Tuple[Tensor, Tensor, Tensor]:
+def _monteCarloIteration(feature: np.ndarray, y: torch.Tensor, i: int,
+                         psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams) -> Tuple[Tensor, Tensor, Tensor]:
     """Evaluates a single iteration of the monte carlo method, used for parallel"""
     # evaluate model
     feature = feature.reshape(1, -1)
@@ -207,8 +152,8 @@ def monteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params: Mo
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, inputVariances, parameterVariances = _baseParallelOverSamples(
-        psdd, lgc, dataset, jobs, _monteCarloIteration, params
+    mean, inputVariances, parameterVariances = parallelOverSamples(
+        dataset, jobs, _monteCarloIteration, psdd, lgc, params
     )
     if ignoreInput:
         inputVariances = torch.zeros(size=inputVariances.shape, dtype=torch.float)
@@ -249,8 +194,9 @@ def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params
 
 # noinspection PyUnusedLocal
 # Required to meet the signature for this function
-def _deltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int,
-                    computeInput: bool = False) -> Union[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor, Tensor]]:
+def _deltaIteration(feature: np.ndarray, y: torch.Tensor, i: int,
+                    psdd: PSddNode, lgc: BaseCircuit, computeInput: bool = False
+                    ) -> Union[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor, Tensor]]:
     """Evaluates a single iteration of the delta method, used for parallel"""
     print(f"Evaluating delta method for sample {i}", end='\r')
     cache = EVCache()
@@ -279,7 +225,7 @@ def deltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSe
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, paramVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaIteration)
+    mean, paramVariance = parallelOverSamples(dataset, jobs, _deltaIteration, psdd, lgc)
 
     # can easily batch input variance as we are not taking gradients there
     inputVariance, _ = deltaInputVariance(psdd, lgc, EVCache(), dataset.images)
@@ -304,7 +250,7 @@ def deltaNoInputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, paramVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaIteration)
+    mean, paramVariance = parallelOverSamples(dataset, jobs, _deltaIteration, psdd, lgc)
 
     gc.collect()
     return orElse(summaryFunction, _summarize)(
@@ -315,7 +261,7 @@ def deltaNoInputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet
 
 # noinspection PyUnusedLocal
 # Required to meet the signature for this function
-def _exactDeltaIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
+def _exactDeltaIteration(feature: np.ndarray, y: torch.Tensor, i: int, psdd: PSddNode, lgc: BaseCircuit
                                  ) -> Tuple[Tensor, Tensor, Tensor]:
     """Evaluates a single iteration of the exact delta method, used for parallel"""
 
@@ -350,8 +296,8 @@ def exactDeltaGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, dataset: D
     """
     # residual uncertainty is added in later as we don't want that included as part of input or parameter
     # thus, this variable has a bit of an odd name as we cannot canonically return total uncertainty
-    mean, paramVariance, inputParameterVariance = _baseParallelOverSamples(
-        psdd, lgc, dataset, jobs, _exactDeltaIteration
+    mean, paramVariance, inputParameterVariance = parallelOverSamples(
+        dataset, jobs, _exactDeltaIteration, psdd, lgc
     )
     inputVariance = inputParameterVariance - paramVariance
 
@@ -392,8 +338,8 @@ def monteCarloParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircui
 
 # noinspection PyUnusedLocal
 # Required to meet the signature for this function
-def _deltaParamIteration(ignored: None, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int,
-                         trainingSampleMean: torch.Tensor) -> Tuple[Tensor, Tensor]:
+def _deltaParamIteration(feature: np.ndarray, y: torch.Tensor, i: int,
+                         lgc: BaseCircuit, trainingSampleMean: torch.Tensor) -> Tuple[Tensor, Tensor]:
     """Evaluates a single iteration of the delta method, used for parallel"""
 
     print(f"Evaluating delta method for sample {i}", end='\r')
@@ -420,7 +366,7 @@ def deltaParamLogLikelihood(trainingSampleMean: np.ndarray, lgc: BaseCircuit, da
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, paramVariance = _baseParallelOverSamples(None, lgc, dataset, jobs, _deltaParamIteration, trainingSampleMean)
+    mean, paramVariance = parallelOverSamples(dataset, jobs, _deltaParamIteration, lgc, trainingSampleMean)
 
     gc.collect()
     return orElse(summaryFunction, _summarize)(
@@ -520,7 +466,7 @@ def deltaGaussianLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, da
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, paramVariance, inputVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _deltaIteration, True)
+    mean, paramVariance, inputVariance = parallelOverSamples(dataset, jobs, _deltaIteration, psdd, lgc, True)
     inputVariance = torch.clamp(inputVariance, min=0)
     totalVariance = inputVariance + paramVariance + residualUncertainty
 
@@ -528,7 +474,9 @@ def deltaGaussianLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, da
     return orElse(summaryFunction, _summarize)(dataset, mean, inputVariance, paramVariance, totalVariance)
 
 
-def _baselineInputIteration(psdd: PSddNode, lgc: BaseCircuit, feature: np.ndarray, y: torch.Tensor, i: int
+# noinspection PyUnusedLocal
+def _baselineInputIteration(feature: np.ndarray, y: torch.Tensor, i: int,
+                            psdd: PSddNode, lgc: BaseCircuit
                             ) -> Union[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor, Tensor]]:
     """Evaluates a single iteration of the baseline input variance method, used for parallel"""
     print(f"Evaluating input baseline method for sample {i}", end='\r')
@@ -553,7 +501,7 @@ def inputLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: D
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
-    mean, inputVariance = _baseParallelOverSamples(psdd, lgc, dataset, jobs, _baselineInputIteration)
+    mean, inputVariance = parallelOverSamples(dataset, jobs, _baselineInputIteration, psdd, lgc)
 
     gc.collect()
     return orElse(summaryFunction, _summarize)(
@@ -562,7 +510,7 @@ def inputLogLikelihoodBenchmarkTime(psdd: PSddNode, lgc: BaseCircuit, dataset: D
     )
 
 
-def _residualInputUncertainty(ignored1: None, ignored2: None, feature: np.ndarray, y: torch.Tensor, i: int,
+def _residualInputUncertainty(feature: np.ndarray, y: torch.Tensor, i: int,
                               validationData: DataSet, residualUncertainty: float,
                               experiment_function, *experiment_arguments) -> Tuple[float, float]:
     # make the same features missing
@@ -594,8 +542,8 @@ def residualPerSampleInput(validationData: DataSet, experiment_function, *experi
     #     )
     inputUncertainty = None
     if summaryFunction is None:
-        inputUncertainty, _ = _baseParallelOverSamples(
-            None, None, dataset, jobs, _residualInputUncertainty, validationData, residualUncertainty,
+        inputUncertainty, _ = parallelOverSamples(
+            dataset, jobs, _residualInputUncertainty, validationData, residualUncertainty,
             experiment_function, *experiment_arguments
         )
 

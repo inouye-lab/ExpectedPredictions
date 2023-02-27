@@ -23,6 +23,10 @@ def _monteCarloIteration(param: torch.Tensor, features: np.ndarray = None, prefi
 def monteCarloPredictionParallel(trainingSampleMean: np.ndarray, lgc: BaseCircuit, params: MonteCarloParams,
                                  obsX: np.ndarray = None, prefix: str = '', jobs: int = -1
                                  ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    This is the baseline for monte carlo that disables batching, as batching is not possible in delta method due to
+    a limitation in gradient calculation
+    """
     # missing values
     # there may be a more vectorized way to write this, cannot think of one and its not a huge deal if its slower
     obsX = obsX.copy()
@@ -49,6 +53,9 @@ def monteCarloPredictionParallel(trainingSampleMean: np.ndarray, lgc: BaseCircui
 
 def deltaMeanAndParameterVariance(trainingSampleMean: np.ndarray, lgc: BaseCircuit, params: torch.Tensor,
                                   obsX: np.ndarray = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Baseline for delta method that ditches the small amount of batching we could do to ensure its comparable
+    """
     if len(lgc.covariance) == 0:
         raise ValueError("Circuit must have covariance to compute a mean and variance")
 
