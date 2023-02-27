@@ -36,7 +36,7 @@ from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussia
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
     inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, basicExpectation, basicMeanImputation, \
-    computeMSEResidualUncertainty, ignoreInputUncertainty, deltaNoInputLogLikelihood, residualPerSampleInput
+    computeMSEResidualUncertainty, deltaNoInputLogLikelihood, residualPerSampleInput
 
 try:
     from time import perf_counter
@@ -428,12 +428,13 @@ if __name__ == '__main__':
         if args.samples > 1:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
             method = monteCarloGaussianLogLikelihood if args.benchmark_time else fastMonteCarloGaussianLogLikelihood
-            run_experiment("Input + MC {}".format(args.samples), percent, method, psdd, lgc, params)
+            run_experiment("Input + MC {}".format(args.samples), percent, method, psdd, lgc, params, False)
             if args.parameter_baseline:
                 # Alternative parameter baseline, just ignores input uncertainty without mean imputation
-                run_experiment("Expectation + MC {}".format(args.samples), percent, ignoreInputUncertainty(method), psdd, lgc, params)
+                run_experiment("Expectation + MC {}".format(args.samples), percent, method, psdd, lgc, params, True)
                 # Standard baseline with mean imputation
-                run_experiment("Imputation + MC {}".format(args.samples), percent, monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
+                run_experiment("Imputation + MC {}".format(args.samples), percent,
+                               monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
         # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
         # have their values set to values from the current sample of the parameters. Most other methods assume the
