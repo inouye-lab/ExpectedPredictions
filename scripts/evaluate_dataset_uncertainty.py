@@ -114,13 +114,22 @@ if __name__ == '__main__':
     # creating the opt parser
     parser = argparse.ArgumentParser()
 
+    # Dataset configuration
     parser.add_argument('model', type=str, help='Model to use for expectations')
-    parser.add_argument('--prefix', type=str, default='',
-                        help='Folder prefix for both the model and the output')
-    parser.add_argument('--output', type=str, help='Location for result csv')
-    parser.add_argument("--classes", type=int, required=True,
-                        help="Number of classes in the dataset")
+    parser.add_argument('--prefix', type=str, default='', help='Folder prefix for both the model and the output')
+    parser.add_argument("--classes", type=int, required=True, help="Number of classes in the dataset")
+    parser.add_argument("--data", type=str, required=True, help="Path to the dataset")
+    parser.add_argument("--retrain_dir", type=str, required=True, help="Location of folders for retrained models")
 
+    # Output configuration
+    parser.add_argument('--output', type=str, help='Location for result csv')
+    parser.add_argument('-v', '--verbose', type=int, nargs='?', default=1, help='Verbosity level')
+    parser.add_argument("--log_results",  action='store_true',
+                        help="If set, results of the script are logged in tabular form after the script finishes "
+                             "executing. "
+                             "Redundant to the CSV file and requires more memory, but useful when running in an IDE.")
+
+    # Methods to include
     parser.add_argument("--skip_delta",  action='store_true',
                         help="If set, the delta method is skipped, running just MC")
     parser.add_argument("--exact_delta",  action='store_true',
@@ -129,30 +138,29 @@ if __name__ == '__main__':
                         help="If set, runs the baseline parameter uncertainty using the dataset mean")
     parser.add_argument("--input_baseline",  action='store_true',
                         help="If set, runs the baseline input uncertainty using the parameter mean")
-    parser.add_argument("--global_missing_features",  action='store_true',
-                        help="If set, the same feature will be missing in all samples. If unset, each sample will have missing features selected separately")
     parser.add_argument("--samples", type=int, default=0,
                         help="Number of monte carlo samples")
-    parser.add_argument("--benchmark_time",  action='store_true',
-                        help="If set, disables batching on several methods to make the times more comparable")
-    parser.add_argument("--evaluate_validation",  action='store_true',
-                        help="If set, evaluates the validation dataset instead of the testing dataset. Used to validate against known data.")
     parser.add_argument("--include_trivial",  action='store_true',
                         help="If set, runs the trivial methods that do not compute uncertainty, only residual")
     parser.add_argument("--include_residual_input",  action='store_true',
                         help="If set, runs the residual input method for trivial methods")
 
+    parser.add_argument("--benchmark_time",  action='store_true',
+                        help="If set, disables batching on several methods to make the times more comparable")
+
+    # Experiment configuration
+    parser.add_argument("--missing", type=float, nargs='*', help="Percent of data to treat as missing")
+    parser.add_argument("--data_percents", type=float, nargs='*', help="Percentages of the dataset to use in training")
     parser.add_argument("--seed", type=int, default=1337,
                         help="Seed for dataset selection")
-    parser.add_argument("--data", type=str, required=True,
-                        help="Path to the dataset")
-    parser.add_argument("--missing", type=float, nargs='*',
-                        help="Percent of data to treat as missing")
-    parser.add_argument("--retrain_dir", type=str, required=True,
-                        help="Location of folders for retrained models")
-    parser.add_argument("--data_percents", type=float, nargs='*',
-                        help="Percentages of the dataset to use in training")
+    parser.add_argument("--global_missing_features",  action='store_true',
+                        help="If set, the same feature will be missing in all samples. "
+                             "If unset, each sample will have missing features selected separately")
+    parser.add_argument("--evaluate_validation",  action='store_true',
+                        help="If set, evaluates the validation dataset instead of the testing dataset. "
+                             "Used to validate against known data.")
 
+    # Residual configuration
     parser.add_argument("--mse_residual",  action='store_true',
                         help="If set, uses the MSE method to compute residual uncertainty")
     parser.add_argument("--conformal_confidence", type=float, default=-1,
@@ -160,13 +168,6 @@ if __name__ == '__main__':
     parser.add_argument("--residual_missingness",  action='store_true',
                         help="If set, uses missing values for residual. If unset, residual is calculated without missing values")
 
-    parser.add_argument('-v', '--verbose', type=int, nargs='?',
-                        default=1,
-                        help='Verbosity level')
-    parser.add_argument("--log_results",  action='store_true',
-                        help="If set, results of the script are logged in tabular form after the script finishes"
-                             "executing. Redundant to the CSV file and requires more memory, but useful when running in"
-                             "an IDE.")
     #
     # parsing the args
     args = parser.parse_args()
@@ -451,7 +452,7 @@ if __name__ == '__main__':
 
     # results
     if args.log_results:
-        formatStr = "{:<20} {:<15} {:<15} " \
+        formatStr = "{:<25} {:<15} {:<15} " \
                     "{:<20} {:<20} " \
                     "{:<25} {:<25} {:<25} {:<25} " \
                     "{:<25} {:<25} {:<25} {:<25} " \
