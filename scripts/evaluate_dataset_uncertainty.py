@@ -399,7 +399,7 @@ if __name__ == '__main__':
         # second loop is over missing value counts
         if not args.skip_delta:
             method = deltaGaussianLogLikelihoodBenchmarkTime if args.benchmark_time else deltaGaussianLogLikelihood
-            run_experiment("Input + Delta", percent, method, psdd, lgc, zero_grad=True)
+            run_experiment("Moment + Delta", percent, method, psdd, lgc, zero_grad=True)
             if args.parameter_baseline:
                 run_experiment("Expectation + Delta", percent, deltaNoInputLogLikelihood, psdd, lgc, zero_grad=True)
                 run_experiment("Imputation + Delta", percent, deltaParamLogLikelihood, trainingSampleMean, lgc, zero_grad=True)
@@ -423,13 +423,13 @@ if __name__ == '__main__':
 
         if args.input_baseline:
             method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
-            run_experiment("Input only", percent, method, psdd, lgc)
+            run_experiment("Moment only", percent, method, psdd, lgc)
 
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
         if args.samples > 1:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
             method = monteCarloGaussianLogLikelihood if args.benchmark_time else fastMonteCarloGaussianLogLikelihood
-            run_experiment("Input + MC {}".format(args.samples), percent, method, psdd, lgc, params, False)
+            run_experiment("Moment + MC {}".format(args.samples), percent, method, psdd, lgc, params, False)
             if args.parameter_baseline:
                 # Alternative parameter baseline, just ignores input uncertainty without mean imputation
                 run_experiment("Expectation + MC {}".format(args.samples), percent, method, psdd, lgc, params, True)
