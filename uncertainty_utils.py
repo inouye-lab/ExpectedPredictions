@@ -3,7 +3,8 @@ Utilities used as part of uncertainty functions. Kept separatate from utils.py a
 make it easier to identify contribution.
 """
 import gc
-from typing import Optional, Any, List
+import numpy as np
+from typing import Optional, Any, List, Tuple, Union
 
 import torch
 from joblib import delayed, Parallel
@@ -68,6 +69,51 @@ def parallelOverSamples(dataset: DataSet, jobs: int, function, *args) -> List[Te
         resultTensors[i] = torch.tensor(result)
     gc.collect()
     return resultTensors
+
+
+def marginalizeGaussian(inputs: np.ndarray, mean: np.ndarray, covariance: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Produces a marginal gaussian distribution over all the missing variables in the input vector
+    """
+    missingIndexes = inputs == -1
+    return mean[missingIndexes], covariance[np.ix_(missingIndexes, missingIndexes)]
+
+
+def conditionalGaussian(inputs: np.array, mean: np.ndarray, covariance: np.ndarray, returnCovariance: bool = True
+                        ) -> Union[Optional[np.ndarray], Tuple[Optional[np.ndarray], Optional[np.ndarray]]]:
+    """
+    Produces a conditional gaussian distribution over all the missing variables in the input vector given observed
+    """
+    # If no observed inputs, nothing to do
+    observedIndexes = inputs != -1
+    if observedIndexes.sum() == 0:
+        if returnCovariance:
+            return mean, covariance
+        return mean
+    # If no missing indexes, nothing we can do
+    missingIndexes = inputs == -1
+    if missingIndexes.sum() == 0:
+        if returnCovariance:
+            return None, None
+        return None
+
+    # Partition of covariance containing covariances between missing indexes and observed indexes
+    corrMatrix = covariance[np.ix_(missingIndexes, observedIndexes)]
+    # Inverted partition of covariance containing just observed indexes
+    obsCovInv = np.linalg.pinv(covariance[np.ix_(observedIndexes, observedIndexes)])
+    # Final computed conditional mean
+    condMean = mean[missingIndexes] + np.matmul(
+        np.matmul(corrMatrix, obsCovInv),
+        inputs[observedIndexes] - mean[observedIndexes]
+    )
+    # Quick exit if we do not care about the conditional covariance
+    if not returnCovariance:
+        return condMean
+
+    # Final computed conditional variance
+    condVar = covariance[np.ix_(missingIndexes, missingIndexes)] \
+        - np.matmul(np.matmul(corrMatrix, obsCovInv), corrMatrix.T)
+    return condMean, condVar
 
 
 def meanImputation(inputs: np.ndarray, mean: np.ndarray) -> np.ndarray:

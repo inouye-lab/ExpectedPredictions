@@ -3,7 +3,7 @@ import copy
 import logging
 import numpy as np
 import torch
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 from EVCache import EVCache
 from LogisticCircuit.algo.BaseCircuit import BaseCircuit
@@ -11,9 +11,11 @@ from circuit_expect import Expectation, moment
 from numpy.random import RandomState
 from pypsdd import PSddNode
 
+# noinspection PyProtectedMember
 from sklearn.linear_model._logistic import (_joblib_parallel_args)
 from joblib import Parallel, delayed
 
+from uncertainty_utils import conditionalGaussian
 
 MonteCarloParams = List[torch.Tensor]
 """List of params for monte carlo, taking advantage of the fact we can reuse a cache for a given input vector"""
@@ -257,3 +259,126 @@ def exactDeltaTotalVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, ob
     hess = torch.autograd.functional.hessian(hess_second_moment, originalParams)
 
     return inputVar + torch.trace(torch.mm(hess.squeeze(), torch.from_numpy(lgc.covariance[0])))
+
+
+def _monteCarloGaussianInputIteration(lgc: BaseCircuit, param: Optional[torch.Tensor],
+                                      inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
+                                      inputReducer: callable, obsX: np.ndarray = None, prefix: str = '', i: int = -1,
+                                      seed: int = 1337, randState: RandomState = None
+                                      ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Single iteration for the parallel monte carlo prediction"""
+    if param is not None:
+        print(f"Evaluating {prefix} MC sample {i}                       ", end='\r')
+        lgc = copy.deepcopy(lgc)
+        lgc.set_node_parameters(param)
+
+    # the goal here is to process all test samples and all input samples in one large batch of size test * input
+    # start by constructing a 3D matrix of test sample * input sample * feature
+    testSamples = obsX.shape[0]
+    features = obsX.shape[1]
+    obsXAugmented = np.zeros((testSamples, inputSamples, features))
+    if randState is None:
+        randState = RandomState(seed)
+    for sample in range(testSamples):
+        image = obsX[sample, :]
+        missingIndexes = image == -1
+
+        obsXAugmented[sample, :, :] = np.repeat(image.reshape(1, 1, -1), repeats=inputSamples, axis=1)
+        # If no missing indexes, no need to handle samples
+        if missingIndexes.sum() != 0:
+            # Need to sample the the distribution the requested number of times, then replace all -1 values
+            missingMean, missingCov = inputReducer(image, inputMean, inputCovariance)
+            missingSamples = randState.multivariate_normal(missingMean, missingCov, size=inputSamples)
+            # TODO: the following clamp is wrong and I should feel ashamed for writing it, but right now I need to test other stuff
+            obsXAugmented[sample, :, missingIndexes] = np.clip(missingSamples.T, 0, 1)
+
+        # we should have filled in all -1 values in the final array
+        assert (obsXAugmented[sample, :, :] == -1).sum() == 0
+
+    # now we have a feature * test sample * input sample array, but to evaluate the circuit we need feature * sample
+    obsXInput = obsXAugmented.reshape(testSamples * inputSamples, features)
+    # for i in range(inputSamples):
+    #     if (obsXAugmented[0, i, :] != obsXInput[i]).sum() != 0:
+    #         print("Vector reshape failed")
+    #     if (obsXAugmented[1, i, :] != obsXInput[inputSamples + i]).sum() != 0:
+    #         print("Vector reshape failed")
+    features = lgc.calculate_features(obsXInput)
+
+    # Process the regression circuit values to get means
+    # reshape so we have means per test sample
+    predictions = torch.mm(torch.from_numpy(features), lgc.parameters.T).reshape(testSamples, inputSamples)
+
+    # average over dimension 1 to get mean and covariances to return
+    return torch.mean(predictions, dim=1).reshape(-1, 1),\
+        torch.var(predictions, dim=1).reshape(-1, 1)
+
+
+def monteCarloGaussianInputOnly(lgc: BaseCircuit, inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
+                                inputReducer: callable = conditionalGaussian, randState: RandomState = None,
+                                obsX: np.ndarray = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Performs a prediction of the mean, parameter variance, and input variance of the circuit using the gaussian method
+    for handling input variances.
+    @param lgc:              Logistic or regression circuit
+    @param inputMean:        Mean vector of the input distribution
+    @param inputCovariance:  Covariance matrix of the input distribution
+    @param inputSamples:     Number of samples to take from the input distribution
+    @param inputReducer:     Function to reduce the random variables, typically marginal or conditional
+    @param randState:        Random state for sampling inputs
+    @param obsX:             Observation vector
+    @return  Tuple of mean, and input variance
+    """
+    # to ensure consistency despite the fact we are generating random numbers on threads
+    # we generate a random seed for each thread to use for its random number generation
+    if randState is None:
+        randState = RandomState(1337)
+
+    means, covariances = _monteCarloGaussianInputIteration(
+        lgc, None, inputMean, inputCovariance, inputSamples, inputReducer, obsX, randState=randState
+    )
+
+    # mean, parameter variance (averaged across input), input variance (averaged across parameters)
+    return means.squeeze(), covariances.squeeze()
+
+
+def monteCarloGaussianParamAndInput(lgc: BaseCircuit, params: MonteCarloParams,
+                                    inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
+                                    inputReducer: callable = conditionalGaussian, randState: RandomState = None,
+                                    obsX: np.ndarray = None,
+                                    prefix: str = '', jobs: int = -1
+                                    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Performs a prediction of the mean, parameter variance, and input variance of the circuit using the gaussian method
+    for handling input variances.
+    @param lgc:              Logistic or regression circuit
+    @param params:           List of parameters to use for the samples
+    @param inputMean:        Mean vector of the input distribution
+    @param inputCovariance:  Covariance matrix of the input distribution
+    @param inputSamples:     Number of samples to take from the input distribution
+    @param inputReducer:     Function to reduce the random variables, typically marginal or conditional
+    @param randState:        Random state for sampling inputs
+    @param obsX:             Observation vector
+    @param prefix:           Prefix for printing
+    @param jobs:             Jobs to run in parallel
+    @return  Tuple of mean, parameter variance, and input variance
+    """
+    # to ensure consistency despite the fact we are generating random numbers on threads
+    # we generate a random seed for each thread to use for its random number generation
+    if randState is None:
+        randState = RandomState(1337)
+    # collect samples for the first two moments, doing in a single loop saves effort setting the parameters
+    delayedFunc = delayed(_monteCarloGaussianInputIteration)
+    result = Parallel(n_jobs=jobs,
+                      **_joblib_parallel_args(prefer='processes'))(
+        delayedFunc(lgc, param, inputMean, inputCovariance, inputSamples, inputReducer, obsX, prefix, i,
+                    randState.randint(0, 2**32 - 1))
+        for i, param in enumerate(params)
+    )
+    means, covariances = zip(*result)
+    means = torch.concat(means, dim=1)
+    covariances = torch.concat(covariances, dim=1)
+
+    # mean, parameter variance (averaged across input), input variance (averaged across parameters)
+    return torch.mean(means, dim=1),\
+        torch.var(means, dim=1),\
+        torch.mean(covariances, dim=1)

@@ -31,13 +31,14 @@ from LogisticCircuit.util.DataSet import DataSet
 from pypsdd.vtree import Vtree as PSDD_Vtree
 from pypsdd.manager import PSddManager
 
-from uncertainty_utils import meanImputation, conditionalMeanImputation
+from uncertainty_utils import meanImputation, conditionalMeanImputation, conditionalGaussian, marginalizeGaussian
 from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
     inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, basicExpectation, basicImputation, \
-    computeMSEResidualUncertainty, deltaNoInputLogLikelihood, residualPerSampleInput
+    computeMSEResidualUncertainty, deltaNoInputLogLikelihood, residualPerSampleInput, \
+    monteCarloGaussianInputOnlyLogLikelihood, monteCarloGaussianParamInputLogLikelihood
 
 try:
     from time import perf_counter
@@ -140,11 +141,13 @@ if __name__ == '__main__':
     parser.add_argument("--input_baseline",  action='store_true',
                         help="If set, runs the baseline input uncertainty using the parameter mean")
     parser.add_argument("--samples", type=int, default=0,
-                        help="Number of monte carlo samples")
+                        help="Number of monte carlo samples for parameters")
     parser.add_argument("--include_trivial",  action='store_true',
                         help="If set, runs the trivial methods that do not compute uncertainty, only residual")
     parser.add_argument("--include_residual_input",  action='store_true',
                         help="If set, runs the residual input method for trivial methods")
+    parser.add_argument("--input_samples", type=int, default=0,
+                        help="Number of monte carlo samples on the input distribution for missing values")
     parser.add_argument("--skip_mc",  action='store_true',
                         help="If set, skips the main monte carlo method even when parameter samples is set")
 
@@ -399,14 +402,14 @@ if __name__ == '__main__':
 
         # sample the training sample mean from the same set of images we use for evaluation
         # will be a bit more accurate to what we can actually produce as far as missing value imputation
-        if args.parameter_baseline or args.include_trivial or args.include_residual_input:
+        if args.parameter_baseline or args.include_trivial or args.include_residual_input or args.input_samples > 0:
             if args.full_training_gaussian:
                 trainingSampleMean = np.mean(trainingImages, axis=0)
             else:
                 trainingSampleMean = np.mean(trainingData.images, axis=0)
 
         # For the guassian methods, we also need a covariance matrix, will use the training sample mean with that
-        if args.include_trivial or args.include_residual_input:
+        if args.input_samples > 0 or args.include_trivial or args.include_residual_input:
             if args.full_training_gaussian:
                 trainingSampleCov = np.cov(trainingImages, rowvar=False)
             else:
@@ -451,6 +454,13 @@ if __name__ == '__main__':
         if args.input_baseline:
             method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
             run_experiment("Moment only", percent, method, psdd, lgc)
+        if args.input_samples > 1:
+            run_experiment("Conditional MC {} only".format(args.input_samples), percent,
+                           monteCarloGaussianInputOnlyLogLikelihood, lgc,
+                           trainingSampleMean, trainingSampleCov, args.input_samples, conditionalGaussian, randState)
+            run_experiment("Marginalize MC {} only".format(args.input_samples), percent,
+                           monteCarloGaussianInputOnlyLogLikelihood, lgc,
+                           trainingSampleMean, trainingSampleCov, args.input_samples, marginalizeGaussian, randState)
 
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
         if args.samples > 1:
@@ -465,6 +475,15 @@ if __name__ == '__main__':
                 run_experiment("Imputation + MC {}".format(args.samples), percent,
                                monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
+            if args.input_samples > 1:
+                run_experiment("Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
+                               monteCarloGaussianParamInputLogLikelihood, lgc, params,
+                               trainingSampleMean, trainingSampleCov, args.input_samples, conditionalGaussian, randState
+                )
+                run_experiment("Marginalize MC {} + MC {}".format(args.input_samples, args.samples), percent,
+                               monteCarloGaussianParamInputLogLikelihood, lgc, params,
+                               trainingSampleMean, trainingSampleCov, args.input_samples, marginalizeGaussian, randState
+                )
         # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
         # have their values set to values from the current sample of the parameters. Most other methods assume the
         # parameters are the mean as those tend to perform the best. As a result any non-MC method placed after a MC
