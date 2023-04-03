@@ -182,7 +182,7 @@ def fastMonteCarloGaussianLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params
     """
     # prepare parallel
     mean, parameterVariances, inputVariances = monteCarloPredictionParallel(
-        psdd, lgc, params, dataset.images, jobs=jobs
+        psdd, lgc, params, dataset.images, jobs=jobs, prefix="Moment"
     )
     if ignoreInput:
         inputVariances = torch.zeros(size=inputVariances.shape, dtype=torch.float)
@@ -419,15 +419,17 @@ def basicExpectation(psdd: PSddNode, lgc: BaseCircuit, dataset: DataSet, summary
         inputUncertainty = variance
 
     gc.collect()
-    return orElse(summaryFunction, _summarize)(dataset, mean, inputUncertainty, variance, inputUncertainty + residualUncertainty)
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, inputUncertainty, variance, inputUncertainty + residualUncertainty
+    )
 
 
-def basicMeanImputation(trainingSampleMean: np.ndarray, lgc: BaseCircuit, dataset: DataSet,
-                        summaryFunction: SummaryFunction = None, residualUncertainty: float = 0,
-                        inputUncertainty: torch.Tensor = None) -> SummaryType:
+def basicImputation(imputationFunction: callable, lgc: BaseCircuit, dataset: DataSet,
+                    summaryFunction: SummaryFunction = None, residualUncertainty: float = 0,
+                    inputUncertainty: torch.Tensor = None) -> SummaryType:
     """
-    Computes likelihood and input variances over the entire dataset
-    @param trainingSampleMean:  Mean for imputation
+    Handles missing values by replacing them with something else
+    @param imputationFunction:  Logic to inject missing values
     @param lgc:                 Logistic or regression circuit
     @param dataset:             Dataset for computing the full value
     @param summaryFunction:     Function to use to generate the summary
@@ -437,10 +439,7 @@ def basicMeanImputation(trainingSampleMean: np.ndarray, lgc: BaseCircuit, datase
              average input variance, average param variance, average total variance
     """
 
-    obsX = dataset.images.copy()
-    for i in range(trainingSampleMean.shape[0]):
-        # anywhere we see a -1 (missing), substitute in the training sample mean for that feature
-        obsX[obsX[:, i] == -1, i] = trainingSampleMean[i]
+    obsX = imputationFunction(dataset.images)
     features = lgc.calculate_features(obsX)
     mean = torch.mm(torch.from_numpy(features), lgc.parameters.T).squeeze()
     variance = torch.zeros(size=mean.shape, dtype=torch.float)

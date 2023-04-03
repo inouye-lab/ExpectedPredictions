@@ -68,3 +68,27 @@ def parallelOverSamples(dataset: DataSet, jobs: int, function, *args) -> List[Te
         resultTensors[i] = torch.tensor(result)
     gc.collect()
     return resultTensors
+
+
+def meanImputation(inputs: np.ndarray, mean: np.ndarray) -> np.ndarray:
+    """Replaces all -1 in the dataset with the mean value from the given mean vector"""
+    inputs = inputs.copy()
+    for i in range(mean.shape[0]):
+        # anywhere we see a -1 (missing), substitute in the training sample mean for that feature
+        inputs[inputs[:, i] == -1, i] = mean[i]
+    return inputs
+
+
+def conditionalMeanImputation(inputs: np.ndarray, mean: np.ndarray, covariance: np.ndarray) -> np.ndarray:
+    """Replaces all -1 in the dataset with conditional mean given the input value"""
+    inputs = inputs.copy()
+    for i in range(inputs.shape[0]):
+        image = inputs[i, :]
+        missingIndexes = image == -1
+        if missingIndexes.sum() != 0:
+            # TODO: the following clamp is wrong and I should feel ashamed for writing it, but right now I need to test other stuff
+            inputs[i, missingIndexes] = np.clip(
+                conditionalGaussian(image, mean, covariance, returnCovariance=False),
+                0, 1
+            )
+    return inputs
