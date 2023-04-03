@@ -9,7 +9,7 @@ from EVCache import EVCache
 from LogisticCircuit.algo.BaseCircuit import BaseCircuit
 from circuit_expect import Expectation, moment
 from numpy.random import RandomState
-from pypsdd import PSddNode
+from pypsdd import PSddNode, InstMap
 
 # noinspection PyProtectedMember
 from sklearn.linear_model._logistic import (_joblib_parallel_args)
@@ -372,6 +372,124 @@ def monteCarloGaussianParamAndInput(lgc: BaseCircuit, params: MonteCarloParams,
                       **_joblib_parallel_args(prefer='processes'))(
         delayedFunc(lgc, param, inputMean, inputCovariance, inputSamples, inputReducer, obsX, prefix, i,
                     randState.randint(0, 2**32 - 1))
+        for i, param in enumerate(params)
+    )
+    means, covariances = zip(*result)
+    means = torch.concat(means, dim=1)
+    covariances = torch.concat(covariances, dim=1)
+
+    # mean, parameter variance (averaged across input), input variance (averaged across parameters)
+    return torch.mean(means, dim=1),\
+        torch.var(means, dim=1),\
+        torch.mean(covariances, dim=1)
+
+
+def _monteCarloPSDDInputIteration(psdd: PSddNode, lgc: BaseCircuit, param: Optional[torch.Tensor], inputSamples: int,
+                                  obsX: np.ndarray = None, prefix: str = '', i: int = -1,
+                                  seed: int = 1337, randState: RandomState = None
+                                  ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Single iteration for the parallel monte carlo PSDD prediction"""
+    if param is not None:
+        print(f"Evaluating {prefix} MC sample {i}                       ", end='\r')
+        lgc = copy.deepcopy(lgc)
+        lgc.set_node_parameters(param)
+        psdd = copy.deepcopy(psdd)
+
+    # the goal here is to process all test samples and all input samples in one large batch of size test * input
+    # start by constructing a 3D matrix of test sample * input sample * feature
+    testSamples = obsX.shape[0]
+    features = obsX.shape[1]
+    obsXAugmented = np.zeros((testSamples, inputSamples, features))
+    if randState is None:
+        randState = RandomState(seed)
+    for sample in range(testSamples):
+        image = obsX[sample, :]
+        missingIndexes = image == -1
+
+        obsXAugmented[sample, :, :] = np.repeat(image.reshape(1, 1, -1), repeats=inputSamples, axis=1)
+        # If no missing indexes, no need to handle samples
+        if missingIndexes.sum() != 0:
+            # Need to sample the the distribution the requested number of times, then replace all -1 values
+            instMap = InstMap.from_list(image)
+            psdd.value(instMap, clear_data = False)
+            for inputSample in range(inputSamples):
+                psddSample = psdd.simulate_with_evidence(instMap.copy())
+                for i, isMissing in enumerate(missingIndexes):
+                    if isMissing:
+                        obsXAugmented[sample, inputSample, i] = psddSample[i + 1]
+                    else:
+                        assert obsXAugmented[sample, inputSample, i] == psddSample[i + 1]
+            psdd.clear_bits()
+
+        # we should have filled in all -1 values in the final array
+        assert (obsXAugmented[sample, :, :] == -1).sum() == 0
+
+    # now we have a feature * test sample * input sample array, but to evaluate the circuit we need feature * sample
+    obsXInput = obsXAugmented.reshape(testSamples * inputSamples, features)
+    # for i in range(inputSamples):
+    #     if (obsXAugmented[0, i, :] != obsXInput[i]).sum() != 0:
+    #         print("Vector reshape failed")
+    #     if (obsXAugmented[1, i, :] != obsXInput[inputSamples + i]).sum() != 0:
+    #         print("Vector reshape failed")
+    features = lgc.calculate_features(obsXInput)
+
+    # Process the regression circuit values to get means
+    # reshape so we have means per test sample
+    predictions = torch.mm(torch.from_numpy(features), lgc.parameters.T).reshape(testSamples, inputSamples)
+
+    # average over dimension 1 to get mean and covariances to return
+    return torch.mean(predictions, dim=1).reshape(-1, 1),\
+        torch.var(predictions, dim=1).reshape(-1, 1)
+
+
+def monteCarloPSDDInputOnly(psdd: PSddNode, lgc: BaseCircuit, inputSamples: int, randState: RandomState = None,
+                            obsX: np.ndarray = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Performs a prediction of the mean, parameter variance, and input variance of the circuit using the MC PSDD method
+    for handling input variances.
+    @param psdd:             Probabilistic circuit root
+    @param lgc:              Logistic or regression circuit
+    @param inputSamples:     Number of samples to take from the input distribution
+    @param randState:        Random state for sampling inputs
+    @param obsX:             Observation vector
+    @return  Tuple of mean, and input variance
+    """
+    # to ensure consistency despite the fact we are generating random numbers on threads
+    # we generate a random seed for each thread to use for its random number generation
+    if randState is None:
+        randState = RandomState(1337)
+
+    means, covariances = _monteCarloPSDDInputIteration(psdd, lgc, None, inputSamples, obsX, randState=randState)
+
+    # mean, parameter variance (averaged across input), input variance (averaged across parameters)
+    return means.squeeze(), covariances.squeeze()
+
+
+def monteCarloPSDDParamAndInput(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, inputSamples: int,
+                                randState: RandomState = None, obsX: np.ndarray = None, prefix: str = '', jobs: int = -1
+                                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Performs a prediction of the mean, parameter variance, and input variance of the circuit using the MC PSDD method
+    for handling input variances.
+    @param psdd:             Probabilistic circuit root
+    @param lgc:              Logistic or regression circuit
+    @param params:           List of parameters to use for the samples
+    @param inputSamples:     Number of samples to take from the input distribution
+    @param randState:        Random state for sampling inputs
+    @param obsX:             Observation vector
+    @param prefix:           Prefix for printing
+    @param jobs:             Jobs to run in parallel
+    @return  Tuple of mean, parameter variance, and input variance
+    """
+    # to ensure consistency despite the fact we are generating random numbers on threads
+    # we generate a random seed for each thread to use for its random number generation
+    if randState is None:
+        randState = RandomState(1337)
+    # collect samples for the first two moments, doing in a single loop saves effort setting the parameters
+    delayedFunc = delayed(_monteCarloPSDDInputIteration)
+    result = Parallel(n_jobs=jobs,
+                      **_joblib_parallel_args(prefer='processes'))(
+        delayedFunc(psdd, lgc, param, inputSamples, obsX, prefix, i, randState.randint(0, 2**32 - 1))
         for i, param in enumerate(params)
     )
     means, covariances = zip(*result)

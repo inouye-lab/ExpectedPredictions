@@ -38,7 +38,8 @@ from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussia
     deltaParamLogLikelihood, inputLogLikelihood, SummaryType, deltaGaussianLogLikelihoodBenchmarkTime, \
     inputLogLikelihoodBenchmarkTime, computeConfidenceResidualUncertainty, basicExpectation, basicImputation, \
     computeMSEResidualUncertainty, deltaNoInputLogLikelihood, residualPerSampleInput, \
-    monteCarloGaussianInputOnlyLogLikelihood, monteCarloGaussianParamInputLogLikelihood
+    monteCarloGaussianInputOnlyLogLikelihood, monteCarloGaussianParamInputLogLikelihood, \
+    monteCarloPSDDInputOnlyLogLikelihood, monteCarloPSDDParamInputLogLikelihood
 
 try:
     from time import perf_counter
@@ -148,6 +149,8 @@ if __name__ == '__main__':
                         help="If set, runs the residual input method for trivial methods")
     parser.add_argument("--input_samples", type=int, default=0,
                         help="Number of monte carlo samples on the input distribution for missing values")
+    parser.add_argument("--psdd_samples", type=int, default=0,
+                        help="Number of monte carlo samples on the psdd distribution for missing values")
     parser.add_argument("--skip_mc",  action='store_true',
                         help="If set, skips the main monte carlo method even when parameter samples is set")
 
@@ -461,6 +464,9 @@ if __name__ == '__main__':
             run_experiment("Marginalize MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
                            trainingSampleMean, trainingSampleCov, args.input_samples, marginalizeGaussian, randState)
+        if args.psdd_samples > 1:
+            run_experiment("PSDD MC {} only".format(args.psdd_samples), percent,
+                           monteCarloPSDDInputOnlyLogLikelihood, psdd, lgc, args.psdd_samples, randState)
 
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
         if args.samples > 1:
@@ -484,6 +490,11 @@ if __name__ == '__main__':
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
                                trainingSampleMean, trainingSampleCov, args.input_samples, marginalizeGaussian, randState
                 )
+            if args.psdd_samples > 1:
+                run_experiment("PSDD MC {} + MC {}".format(args.psdd_samples, args.samples), percent,
+                               monteCarloPSDDParamInputLogLikelihood, psdd, lgc, params, args.psdd_samples, randState
+                )
+
         # BIG WARNING: during the calculations of monte carlo methods, lgc.parameters is the mean while the nodes
         # have their values set to values from the current sample of the parameters. Most other methods assume the
         # parameters are the mean as those tend to perform the best. As a result any non-MC method placed after a MC

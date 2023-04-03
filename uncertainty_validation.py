@@ -14,7 +14,7 @@ from circuit_expect import Expectation
 from pypsdd import PSddNode
 from uncertainty_calculations import deltaMeanAndParameterVariance, deltaInputVariance, \
     monteCarloPrediction, MonteCarloParams, monteCarloPredictionParallel, exactDeltaTotalVariance, \
-    monteCarloGaussianParamAndInput, monteCarloGaussianInputOnly
+    monteCarloGaussianParamAndInput, monteCarloGaussianInputOnly, monteCarloPSDDInputOnly, monteCarloPSDDParamAndInput
 from uncertainty_utils import orElse, gaussianLogLikelihood, gaussianPValue, confidenceError, \
     parallelOverSamples, conditionalGaussian
 
@@ -612,6 +612,63 @@ def monteCarloGaussianParamInputLogLikelihood(lgc: BaseCircuit, params: MonteCar
     mean, parameterVariances, inputVariances = monteCarloGaussianParamAndInput(
         lgc, params, inputMean, inputCovariance, inputSamples, inputReducer, randState, dataset.images,
         jobs=jobs, prefix="Input Gaussian"
+    )
+    totalVariances = parameterVariances + inputVariances + residualUncertainty
+
+    gc.collect()
+    return orElse(summaryFunction, _summarize)(dataset, mean, inputVariances, parameterVariances, totalVariances)
+
+
+def monteCarloPSDDInputOnlyLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, inputSamples: int,
+                                         randState: RandomState = None, dataset: DataSet = None,
+                                         summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
+                                         ) -> SummaryType:
+    """
+    Computes likelihood and variances over the entire dataset using the monte carlo sampling on a PSDD for missing
+    values/uncertainty performing parallel over parameters and using torch to do parallel over input and test samples
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param inputSamples:        Number of samples to take from the input distribution
+    @param randState:           Random state for sampling inputs
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+    mean, inputVariances = monteCarloPSDDInputOnly(
+        psdd, lgc, inputSamples, randState, dataset.images
+    )
+    totalVariances = inputVariances + residualUncertainty
+
+    gc.collect()
+    return orElse(summaryFunction, _summarize)(
+        dataset, mean, inputVariances, torch.zeros(size=inputVariances.shape, dtype=torch.float), totalVariances
+    )
+
+
+def monteCarloPSDDParamInputLogLikelihood(psdd: PSddNode, lgc: BaseCircuit, params: MonteCarloParams, inputSamples: int,
+                                          randState: RandomState = None, dataset: DataSet = None, jobs: int = -1,
+                                          summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
+                                          ) -> SummaryType:
+    """
+    Computes likelihood and variances over the entire dataset using the MC PSDD method for missing values/uncertainty
+    performing parallel over parameters and using torch to do parallel over test samples and input samples
+    @param psdd:                Probabilistic circuit root
+    @param lgc:                 Logistic or regression circuit
+    @param dataset:             Dataset for computing the full value
+    @param params:              Parameters to use for estimates
+    @param inputSamples:        Number of samples to take from the input distribution
+    @param randState:           Random state for sampling inputs
+    @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
+    @param summaryFunction:     Function to use to generate the summary
+    @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
+    @return  Tuple of total error, average input LL, average param LL, average total LL,
+             average input variance, average param variance, average total variance
+    """
+    mean, parameterVariances, inputVariances = monteCarloPSDDParamAndInput(
+        psdd, lgc, params, inputSamples, randState, dataset.images,
+        jobs=jobs, prefix="Input MC-PSDD"
     )
     totalVariances = parameterVariances + inputVariances + residualUncertainty
 
