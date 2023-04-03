@@ -145,6 +145,8 @@ if __name__ == '__main__':
                         help="If set, runs the trivial methods that do not compute uncertainty, only residual")
     parser.add_argument("--include_residual_input",  action='store_true',
                         help="If set, runs the residual input method for trivial methods")
+    parser.add_argument("--skip_mc",  action='store_true',
+                        help="If set, skips the main monte carlo method even when parameter samples is set")
 
     parser.add_argument("--benchmark_time",  action='store_true',
                         help="If set, disables batching on several methods to make the times more comparable")
@@ -454,7 +456,8 @@ if __name__ == '__main__':
         if args.samples > 1:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
             method = monteCarloGaussianLogLikelihood if args.benchmark_time else fastMonteCarloGaussianLogLikelihood
-            run_experiment("Moment + MC {}".format(args.samples), percent, method, psdd, lgc, params, False)
+            if not args.skip_mc:
+                run_experiment("Moment + MC {}".format(args.samples), percent, method, psdd, lgc, params, False)
             if args.parameter_baseline:
                 # Alternative parameter baseline, just ignores input uncertainty without mean imputation
                 run_experiment("Expectation + MC {}".format(args.samples), percent, method, psdd, lgc, params, True)
