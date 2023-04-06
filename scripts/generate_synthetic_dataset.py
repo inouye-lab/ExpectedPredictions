@@ -127,7 +127,7 @@ if __name__ == '__main__':
         trainingSampleCov = np.cov(trainingImages, rowvar=False)
 
         logging.info("Sampling Gaussian..")
-        xSamples = np.clip(randState.multivariate_normal(trainingSampleMean, trainingSampleCov, size=totalSamples), 0, 1)
+        xSamples = np.where(randState.multivariate_normal(trainingSampleMean, trainingSampleCov, size=totalSamples) > 0.5, 1, 0)
     else:
         # when no gaussian data, sample from the PSDD
         logging.info("Loading PSDD..")
