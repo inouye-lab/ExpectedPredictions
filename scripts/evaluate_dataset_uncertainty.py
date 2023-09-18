@@ -168,6 +168,8 @@ if __name__ == '__main__':
     parser.add_argument("--evaluate_validation",  action='store_true',
                         help="If set, evaluates the validation dataset instead of the testing dataset. "
                              "Used to validate against known data.")
+    parser.add_argument("--skip_enforce_boolean",  action='store_true',
+                        help="If set, runs the likely wrong behavior of not enforcing booleans.")
     parser.add_argument("--full_training_gaussian",  action='store_true',
                         help="If set, uses the full training set for gaussian instead of the set used in RC training. "
                              "Provides more parity with PSDD training.")
@@ -432,12 +434,14 @@ if __name__ == '__main__':
 
         lgc.zero_grad(False)
 
+        enforceBoolean = not args.skip_enforce_boolean
         if args.include_trivial or args.include_residual_input:
             def basicMeanImputation(inputs: np.ndarray):
-                return meanImputation(inputs, trainingSampleMean)
+                return meanImputation(inputs, trainingSampleMean, enforceBoolean=enforceBoolean)
 
             def basicConditionalImputation(inputs: np.ndarray):
-                return conditionalMeanImputation(inputs, trainingSampleMean, trainingSampleCov)
+                return conditionalMeanImputation(inputs, trainingSampleMean, trainingSampleCov,
+                                                 enforceBoolean=enforceBoolean)
 
             if args.include_trivial:
                 run_experiment("Mean Imputation", percent, basicImputation, basicMeanImputation, lgc)
@@ -460,10 +464,12 @@ if __name__ == '__main__':
         if args.input_samples > 1:
             run_experiment("Conditional MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
-                           trainingSampleMean, trainingSampleCov, args.input_samples, conditionalGaussian, randState)
+                           trainingSampleMean, trainingSampleCov, args.input_samples,
+                           conditionalGaussian, randState, enforceBoolean)
             run_experiment("Marginalize MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
-                           trainingSampleMean, trainingSampleCov, args.input_samples, marginalizeGaussian, randState)
+                           trainingSampleMean, trainingSampleCov, args.input_samples,
+                           marginalizeGaussian, randState, enforceBoolean)
         if args.psdd_samples > 1:
             run_experiment("PSDD MC {} only".format(args.psdd_samples), percent,
                            monteCarloPSDDInputOnlyLogLikelihood, psdd, lgc, args.psdd_samples, randState)
@@ -484,11 +490,13 @@ if __name__ == '__main__':
             if args.input_samples > 1:
                 run_experiment("Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
-                               trainingSampleMean, trainingSampleCov, args.input_samples, conditionalGaussian, randState
+                               trainingSampleMean, trainingSampleCov, args.input_samples,
+                               conditionalGaussian, randState, enforceBoolean
                 )
                 run_experiment("Marginalize MC {} + MC {}".format(args.input_samples, args.samples), percent,
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
-                               trainingSampleMean, trainingSampleCov, args.input_samples, marginalizeGaussian, randState
+                               trainingSampleMean, trainingSampleCov, args.input_samples,
+                               marginalizeGaussian, randState, enforceBoolean
                 )
             if args.psdd_samples > 1:
                 run_experiment("PSDD MC {} + MC {}".format(args.psdd_samples, args.samples), percent,

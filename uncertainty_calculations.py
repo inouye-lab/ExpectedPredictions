@@ -263,8 +263,9 @@ def exactDeltaTotalVariance(psdd: PSddNode, lgc: BaseCircuit, cache: EVCache, ob
 
 def _monteCarloGaussianInputIteration(lgc: BaseCircuit, param: Optional[torch.Tensor],
                                       inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
-                                      inputReducer: callable, obsX: np.ndarray = None, prefix: str = '', i: int = -1,
-                                      seed: int = 1337, randState: RandomState = None
+                                      inputReducer: callable, obsX: np.ndarray = None,
+                                      prefix: str = '', i: int = -1, seed: int = 1337, randState: RandomState = None,
+                                      enforceBoolean: bool = True
                                       ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Single iteration for the parallel monte carlo prediction"""
     if param is not None:
@@ -275,7 +276,8 @@ def _monteCarloGaussianInputIteration(lgc: BaseCircuit, param: Optional[torch.Te
     # the goal here is to process all test samples and all input samples in one large batch of size test * input
     # start by constructing a 3D matrix of test sample * input sample * feature
     obsXAugmented = augmentMonteCarloSamplesGaussian(
-        inputMean, inputCovariance, inputSamples, inputReducer, obsX, seed, randState
+        inputMean, inputCovariance, inputSamples, inputReducer, obsX, seed, randState,
+        enforceBoolean=enforceBoolean
     )
 
     # TODO: if the above is a callable, the below is redundant to the PSDD version
@@ -300,8 +302,9 @@ def _monteCarloGaussianInputIteration(lgc: BaseCircuit, param: Optional[torch.Te
 
 
 def monteCarloGaussianInputOnly(lgc: BaseCircuit, inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
-                                inputReducer: callable = conditionalGaussian, randState: RandomState = None,
-                                obsX: np.ndarray = None) -> Tuple[torch.Tensor, torch.Tensor]:
+                                inputReducer: callable = conditionalGaussian,
+                                randState: RandomState = None, obsX: np.ndarray = None, enforceBoolean: bool = True
+                                ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Performs a prediction of the mean, parameter variance, and input variance of the circuit using the gaussian method
     for handling input variances.
@@ -312,6 +315,7 @@ def monteCarloGaussianInputOnly(lgc: BaseCircuit, inputMean: np.ndarray, inputCo
     @param inputReducer:     Function to reduce the random variables, typically marginal or conditional
     @param randState:        Random state for sampling inputs
     @param obsX:             Observation vector
+    @param enforceBoolean:   If true, gaussian samples are forced to be 0 or 1, instead of allowing probability values
     @return  Tuple of mean, and input variance
     """
     # to ensure consistency despite the fact we are generating random numbers on threads
@@ -320,7 +324,8 @@ def monteCarloGaussianInputOnly(lgc: BaseCircuit, inputMean: np.ndarray, inputCo
         randState = RandomState(1337)
 
     means, covariances = _monteCarloGaussianInputIteration(
-        lgc, None, inputMean, inputCovariance, inputSamples, inputReducer, obsX, randState=randState
+        lgc, None, inputMean, inputCovariance, inputSamples, inputReducer, obsX,
+        randState=randState, enforceBoolean=enforceBoolean
     )
 
     # mean, parameter variance (averaged across input), input variance (averaged across parameters)
@@ -329,9 +334,9 @@ def monteCarloGaussianInputOnly(lgc: BaseCircuit, inputMean: np.ndarray, inputCo
 
 def monteCarloGaussianParamAndInput(lgc: BaseCircuit, params: MonteCarloParams,
                                     inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
-                                    inputReducer: callable = conditionalGaussian, randState: RandomState = None,
-                                    obsX: np.ndarray = None,
-                                    prefix: str = '', jobs: int = -1
+                                    inputReducer: callable = conditionalGaussian,
+                                    randState: RandomState = None, obsX: np.ndarray = None,
+                                    prefix: str = '', jobs: int = -1, enforceBoolean: bool = True
                                     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Performs a prediction of the mean, parameter variance, and input variance of the circuit using the gaussian method
@@ -344,6 +349,7 @@ def monteCarloGaussianParamAndInput(lgc: BaseCircuit, params: MonteCarloParams,
     @param inputReducer:     Function to reduce the random variables, typically marginal or conditional
     @param randState:        Random state for sampling inputs
     @param obsX:             Observation vector
+    @param enforceBoolean:   If true, gaussian samples are forced to be 0 or 1, instead of allowing probability values
     @param prefix:           Prefix for printing
     @param jobs:             Jobs to run in parallel
     @return  Tuple of mean, parameter variance, and input variance
@@ -356,8 +362,8 @@ def monteCarloGaussianParamAndInput(lgc: BaseCircuit, params: MonteCarloParams,
     delayedFunc = delayed(_monteCarloGaussianInputIteration)
     result = Parallel(n_jobs=jobs,
                       **_joblib_parallel_args(prefer='processes'))(
-        delayedFunc(lgc, param, inputMean, inputCovariance, inputSamples, inputReducer, obsX, prefix, i,
-                    randState.randint(0, 2**32 - 1))
+        delayedFunc(lgc, param, inputMean, inputCovariance, inputSamples, inputReducer, obsX,
+                    prefix, i, randState.randint(0, 2**32 - 1), None, enforceBoolean)
         for i, param in enumerate(params)
     )
     means, covariances = zip(*result)

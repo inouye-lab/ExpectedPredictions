@@ -557,8 +557,9 @@ def residualPerSampleInput(validationData: DataSet, experiment_function, *experi
 def monteCarloGaussianInputOnlyLogLikelihood(lgc: BaseCircuit,
                                              inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
                                              inputReducer: callable = conditionalGaussian,
-                                             randState: RandomState = None, dataset: DataSet = None,
-                                             summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
+                                             randState: RandomState = None, enforceBoolean: bool = True,
+                                             dataset: DataSet = None, summaryFunction: SummaryFunction = None,
+                                             residualUncertainty: float = 0
                                              ) -> SummaryType:
     """
     Computes likelihood and variances over the entire dataset using the gaussian method for missing values/uncertainty
@@ -570,13 +571,16 @@ def monteCarloGaussianInputOnlyLogLikelihood(lgc: BaseCircuit,
     @param inputSamples:        Number of samples to take from the input distribution
     @param inputReducer:        Function to reduce the random variables, typically marginal or conditional
     @param randState:           Random state for sampling inputs
+    @param enforceBoolean:      If true, enforces gaussian samples are boolean values.
+                                Circuits can handle probability values but booleans ensures consistency with NNs
     @param summaryFunction:     Function to use to generate the summary
     @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
     @return  Tuple of total error, average input LL, average param LL, average total LL,
              average input variance, average param variance, average total variance
     """
     mean, inputVariances = monteCarloGaussianInputOnly(
-        lgc, inputMean, inputCovariance, inputSamples, inputReducer, randState, dataset.images
+        lgc, inputMean, inputCovariance, inputSamples, inputReducer, randState, dataset.images,
+        enforceBoolean=enforceBoolean
     )
     totalVariances = inputVariances + residualUncertainty
 
@@ -589,7 +593,8 @@ def monteCarloGaussianInputOnlyLogLikelihood(lgc: BaseCircuit,
 def monteCarloGaussianParamInputLogLikelihood(lgc: BaseCircuit, params: MonteCarloParams,
                                               inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
                                               inputReducer: callable = conditionalGaussian,
-                                              randState: RandomState = None, dataset: DataSet = None, jobs: int = -1,
+                                              randState: RandomState = None, enforceBoolean: bool = True,
+                                              dataset: DataSet = None, jobs: int = -1,
                                               summaryFunction: SummaryFunction = None, residualUncertainty: float = 0
                                               ) -> SummaryType:
     """
@@ -603,6 +608,7 @@ def monteCarloGaussianParamInputLogLikelihood(lgc: BaseCircuit, params: MonteCar
     @param inputSamples:        Number of samples to take from the input distribution
     @param inputReducer:        Function to reduce the random variables, typically marginal or conditional
     @param randState:           Random state for sampling inputs
+    @param enforceBoolean:      If true, enforces gaussian samples are boolean values.
     @param jobs:                Max number of parallel jobs to run, use -1 to use the max possible
     @param summaryFunction:     Function to use to generate the summary
     @param residualUncertainty: Uncertainty from sources other than input and parameters, summed into final total
@@ -610,8 +616,8 @@ def monteCarloGaussianParamInputLogLikelihood(lgc: BaseCircuit, params: MonteCar
              average input variance, average param variance, average total variance
     """
     mean, parameterVariances, inputVariances = monteCarloGaussianParamAndInput(
-        lgc, params, inputMean, inputCovariance, inputSamples, inputReducer, randState, dataset.images,
-        jobs=jobs, prefix="Input Gaussian"
+        lgc, params, inputMean, inputCovariance, inputSamples, inputReducer, randState,
+        dataset.images, jobs=jobs, prefix="Input Gaussian", enforceBoolean=enforceBoolean
     )
     totalVariances = parameterVariances + inputVariances + residualUncertainty
 

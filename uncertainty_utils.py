@@ -117,16 +117,18 @@ def conditionalGaussian(inputs: np.array, mean: np.ndarray, covariance: np.ndarr
     return condMean, condVar
 
 
-def meanImputation(inputs: np.ndarray, mean: np.ndarray) -> np.ndarray:
+def meanImputation(inputs: np.ndarray, mean: np.ndarray, enforceBoolean: bool = True) -> np.ndarray:
     """Replaces all -1 in the dataset with the mean value from the given mean vector"""
     inputs = inputs.copy()
+    meanVals = (mean > 0.5).astype(float) if enforceBoolean else mean
     for i in range(mean.shape[0]):
         # anywhere we see a -1 (missing), substitute in the training sample mean for that feature
-        inputs[inputs[:, i] == -1, i] = mean[i]
+        inputs[inputs[:, i] == -1, i] = meanVals[i]
     return inputs
 
 
-def conditionalMeanImputation(inputs: np.ndarray, mean: np.ndarray, covariance: np.ndarray) -> np.ndarray:
+def conditionalMeanImputation(inputs: np.ndarray, mean: np.ndarray, covariance: np.ndarray,
+                              enforceBoolean: bool = True) -> np.ndarray:
     """Replaces all -1 in the dataset with conditional mean given the input value"""
     inputs = inputs.copy()
     for i in range(inputs.shape[0]):
@@ -134,16 +136,18 @@ def conditionalMeanImputation(inputs: np.ndarray, mean: np.ndarray, covariance: 
         missingIndexes = image == -1
         if missingIndexes.sum() != 0:
             # TODO: the following clamp is wrong and I should feel ashamed for writing it, but right now I need to test other stuff
-            inputs[i, missingIndexes] = np.clip(
-                conditionalGaussian(image, mean, covariance, returnCovariance=False),
-                0, 1
-            )
+            condMeans = conditionalGaussian(image, mean, covariance, returnCovariance=False)
+            if enforceBoolean:
+                inputs[i, missingIndexes] = (condMeans > 0.5).astype(float)
+            else:
+                inputs[i, missingIndexes] = np.clip(condMeans, 0, 1)
     return inputs
 
 
 def augmentMonteCarloSamplesGaussian(inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
                                      inputCovarianceInv: np.ndarray, inputReducer: callable, obsX: np.ndarray = None,
-                                     seed: int = 1337, randState: RandomState = None) -> np.ndarray:
+                                     seed: int = 1337, randState: RandomState = None,
+                                     enforceBoolean: bool = True) -> np.ndarray:
     """
     Augments the observed X values with monte carlo samples from a gaussian input distribution
     """
@@ -169,7 +173,10 @@ def augmentMonteCarloSamplesGaussian(inputMean: np.ndarray, inputCovariance: np.
             missingMean, missingCov = inputReducer(image, inputMean, inputCovariance, inputCovarianceInv)
             missingSamples = randState.multivariate_normal(missingMean, missingCov, size=inputSamples)
             # TODO: the following clamp is wrong and I should feel ashamed for writing it, but right now I need to test other stuff
-            obsXAugmented[sample, :, missingIndexes] = np.clip(missingSamples.T, 0, 1)
+            if enforceBoolean:
+                obsXAugmented[sample, :, missingIndexes] = (missingSamples.T > 0.5).astype(float)
+            else:
+                obsXAugmented[sample, :, missingIndexes] = np.clip(missingSamples.T, 0, 1)
 
         # we should have filled in all -1 values in the final array
         assert (obsXAugmented[sample, :, :] == -1).sum() == 0
