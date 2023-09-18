@@ -15,8 +15,7 @@ generate_and_train() {
   # Step 1: Generate dataset
   local sdataFolder=sdata/synthetic/
   if python scripts/generate_synthetic_dataset.py $model --folder "exp/uncertainty/$model/ridge/${model}_$date/" --classes 0 \
-      --output $sdataFolder --output_id $now --train_count 1000 --valid_count 500 --test_count 500 \
-      --fmap_path data/$model/fmap-$model.pickle $genParams
+      --output $sdataFolder --output_id $now --train_count 1000 --valid_count 500 --test_count 500 $genParams
   then
     # Step 2: train circuit pair
     local data=$sdataFolder$model/$now/$model.pklz
@@ -32,9 +31,10 @@ generate_and_train() {
       then
         # Step 4: evaluate model
         local args="$model --prefix $expFolder$now/ --retrain_dir retrain/$now/ --data $data --classes 1 --data_percents 0.5 1.0 --missing 0 0.25 0.5 0.75 0.99 "\
-"--skip_delta --include_residual_input --mse_residual --input_baseline --include_trivial --input_samples 100 --psdd_samples 100 --full_training_gaussian"
-        python scripts/evaluate_dataset_uncertainty.py $args --output results/synthetic/noresid/
-        python scripts/evaluate_dataset_uncertainty.py $args --output results/synthetic/resid/ --residual_missingness
+"--skip_delta --include_residual_input --mse_residual --input_baseline --include_trivial --input_samples 100 --psdd_samples 100 --full_training_gaussian"\
+"--fmap data/$model/fmap-$model.pickle"
+        python scripts/evaluate_dataset_uncertainty.py $args --output results/synthetic/noresid_gaussian2/
+        python scripts/evaluate_dataset_uncertainty.py $args --output results/synthetic/resid_gaussian2/ --residual_missingness
       else
         echo Failed to retrain circuit parameters, giving up
       fi
