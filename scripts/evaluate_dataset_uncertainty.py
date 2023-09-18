@@ -156,6 +156,9 @@ if __name__ == '__main__':
 
     parser.add_argument("--benchmark_time",  action='store_true',
                         help="If set, disables batching on several methods to make the times more comparable")
+    parser.add_argument("--include_conditional",  action='store_true',
+                        help="If set, includes the conditional gaussian method when relevant. Can potentially lead to "
+                             "a crash with the inverse not converging that is still being debugged.")
 
     # Experiment configuration
     parser.add_argument("--missing", type=float, nargs='*', help="Percent of data to treat as missing")
@@ -445,15 +448,17 @@ if __name__ == '__main__':
 
             if args.include_trivial:
                 run_experiment("Mean Imputation", percent, basicImputation, basicMeanImputation, lgc)
-                run_experiment("Conditional Imputation", percent, basicImputation, basicConditionalImputation, lgc)
+                if args.include_conditional:
+                    run_experiment("Conditional Imputation", percent, basicImputation, basicConditionalImputation, lgc)
                 run_experiment("Expectation", percent, basicExpectation, psdd, lgc)
             if args.include_residual_input:
                 run_experiment("Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicMeanImputation, lgc)
-                run_experiment("Conditional + Residual", percent,
-                               residualPerSampleInput, pureValidSet,
-                               basicImputation, basicConditionalImputation, lgc)
+                if args.include_conditional:
+                    run_experiment("Conditional + Residual", percent,
+                                   residualPerSampleInput, pureValidSet,
+                                   basicImputation, basicConditionalImputation, lgc)
                 run_experiment("Expectation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicExpectation, psdd, lgc)
@@ -462,10 +467,11 @@ if __name__ == '__main__':
             method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
             run_experiment("Moment only", percent, method, psdd, lgc)
         if args.input_samples > 1:
-            run_experiment("Conditional MC {} only".format(args.input_samples), percent,
-                           monteCarloGaussianInputOnlyLogLikelihood, lgc,
-                           trainingSampleMean, trainingSampleCov, args.input_samples,
-                           conditionalGaussian, randState, enforceBoolean)
+            if args.include_conditional:
+                run_experiment("Conditional MC {} only".format(args.input_samples), percent,
+                               monteCarloGaussianInputOnlyLogLikelihood, lgc,
+                               trainingSampleMean, trainingSampleCov, args.input_samples,
+                               conditionalGaussian, randState, enforceBoolean)
             run_experiment("Marginalize MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
                            trainingSampleMean, trainingSampleCov, args.input_samples,
@@ -488,11 +494,12 @@ if __name__ == '__main__':
                                monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
             if args.input_samples > 1:
-                run_experiment("Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
-                               monteCarloGaussianParamInputLogLikelihood, lgc, params,
-                               trainingSampleMean, trainingSampleCov, args.input_samples,
-                               conditionalGaussian, randState, enforceBoolean
-                )
+                if args.include_conditional:
+                    run_experiment("Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
+                                   monteCarloGaussianParamInputLogLikelihood, lgc, params,
+                                   trainingSampleMean, trainingSampleCov, args.input_samples,
+                                   conditionalGaussian, randState, enforceBoolean
+                    )
                 run_experiment("Marginalize MC {} + MC {}".format(args.input_samples, args.samples), percent,
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
                                trainingSampleMean, trainingSampleCov, args.input_samples,
