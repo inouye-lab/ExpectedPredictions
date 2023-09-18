@@ -27,6 +27,7 @@ import pypsdd.psdd_io
 from LogisticCircuit.algo.LogisticCircuit import LogisticCircuit
 from LogisticCircuit.structure.Vtree import Vtree as LC_Vtree
 from LogisticCircuit.util.DataSet import DataSet
+from LogisticCircuit.algo.NeuralNetworkBaseline import NeuralNetworkRegressor
 
 from pypsdd.vtree import Vtree as PSDD_Vtree
 from pypsdd.manager import PSddManager
@@ -40,6 +41,8 @@ from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussia
     computeMSEResidualUncertainty, deltaNoInputLogLikelihood, residualPerSampleInput, \
     monteCarloGaussianInputOnlyLogLikelihood, monteCarloGaussianParamInputLogLikelihood, \
     monteCarloPSDDInputOnlyLogLikelihood, monteCarloPSDDParamInputLogLikelihood
+from uncertainty_neural_network import basicNNImputation, monteCarloGaussianNNInputOnlyLogLikelihood, \
+    monteCarloPSDDNNInputOnlyLogLikelihood
 
 try:
     from time import perf_counter
@@ -120,6 +123,7 @@ if __name__ == '__main__':
     # Dataset configuration
     parser.add_argument('model', type=str, help='Model to use for expectations')
     parser.add_argument('--prefix', type=str, default='', help='Folder prefix for both the model and the output')
+    parser.add_argument('--nn_folder', type=str, default='', help='Location of the neural network baseline. If unset, skips')
     parser.add_argument("--classes", type=int, required=True, help="Number of classes in the dataset")
     parser.add_argument("--data", type=str, required=True, help="Path to the dataset")
     parser.add_argument("--fmap", type=str, default='', help="Path to the dataset fmap")
@@ -404,9 +408,20 @@ if __name__ == '__main__':
         logging.info("Running {} percent".format(percent*100))
         logging.info("========================================================================================")
         percentFolder = retrainFolder + str(percent*100)
+
+        # Always load the regression circuit
         with open(percentFolder + "percent.glc", 'r') as circuit_file:
             requireGrad = not args.skip_delta or args.exact_delta
             lgc = LogisticCircuit(lc_vtree, args.classes, circuit_file=circuit_file, requires_grad=requireGrad)
+
+        # Load the neural network if asked
+        nn: Optional[NeuralNetworkRegressor] = None
+        if args.nn_folder != '':
+            with open(args.nn_folder + str(percent*100) + "percent.pickle", 'rb') as network_file:
+                nn = pickle.load(network_file)
+
+        # training samples are used to construct training sample matrixes
+        # for simplicity and consistency, we use the same samples in both, this is a parameter during training
         with open(percentFolder + "percentSamples.txt", 'r') as sample_file:
             indices = [int(v.strip()) for v in sample_file.readlines()]
 
@@ -462,19 +477,33 @@ if __name__ == '__main__':
             # Basic imputation: runs the regressor handling missing values via imputation
             # Expectation is Expected Predictions first moment
             if args.include_trivial:
-                run_experiment("Mean Imputation", percent, basicImputation, basicMeanImputation, lgc)
-                run_experiment("Conditional Imputation", percent, basicImputation, basicConditionalImputation, lgc)
+                run_experiment("RC Mean Imputation", percent, basicImputation, basicMeanImputation, lgc)
+                run_experiment("RC Conditional Imputation", percent, basicImputation, basicConditionalImputation, lgc)
                 run_experiment("Expectation", percent, basicExpectation, psdd, lgc)
+                if nn is not None:
+                    run_experiment("NN Mean Imputation", percent, basicNNImputation, basicMeanImputation, nn)
+                    run_experiment("NN Conditional Imputation", percent, basicNNImputation,
+                                   basicConditionalImputation, nn)
+
+            # Residual input runs any of the above basic methods, making like samples with known labels to produce a
+            # baseline uncertainty
             if args.include_residual_input:
-                run_experiment("Imputation + Residual", percent,
+                run_experiment("RC Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicMeanImputation, lgc)
-                run_experiment("Conditional + Residual", percent,
+                run_experiment("RC Conditional + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicConditionalImputation, lgc)
                 run_experiment("Expectation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicExpectation, psdd, lgc)
+                if nn is not None:
+                    run_experiment("NN Imputation + Residual", percent,
+                                   residualPerSampleInput, pureValidSet,
+                                   basicNNImputation, basicMeanImputation, nn)
+                    run_experiment("NN Conditional + Residual", percent,
+                                   residualPerSampleInput, pureValidSet,
+                                   basicNNImputation, basicConditionalImputation, nn)
 
         # Handles input uncertainty simply as the second moment
         if args.input_baseline:
@@ -483,17 +512,31 @@ if __name__ == '__main__':
 
         # Handle input uncertainty as samples from a monte carlo gaussian
         if args.input_samples > 1:
-            run_experiment("Conditional MC {} only".format(args.input_samples), percent,
+            run_experiment("RC Conditional MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
                            trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                            conditionalGaussian, randState, enforceBoolean)
-            run_experiment("Marginalize MC {} only".format(args.input_samples), percent,
+            run_experiment("RC Marginalize MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
                            trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                            marginalizeGaussian, randState, enforceBoolean)
+            if nn is not None:
+                run_experiment("NN Conditional MC {} only".format(args.input_samples), percent,
+                               monteCarloGaussianNNInputOnlyLogLikelihood, nn,
+                               trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
+                               conditionalGaussian, randState, enforceBoolean)
+                run_experiment("NN Marginalize MC {} only".format(args.input_samples), percent,
+                               monteCarloGaussianNNInputOnlyLogLikelihood, nn,
+                               trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
+                               marginalizeGaussian, randState, enforceBoolean)
+
+        # Handle input uncertainty as samples from a monte carlo psdd
         if args.psdd_samples > 1:
-            run_experiment("PSDD MC {} only".format(args.psdd_samples), percent,
+            run_experiment("RC PSDD MC {} only".format(args.psdd_samples), percent,
                            monteCarloPSDDInputOnlyLogLikelihood, psdd, lgc, args.psdd_samples, randState)
+            if nn is not None:
+                run_experiment("NN PSDD MC {} only".format(args.psdd_samples), percent,
+                               monteCarloPSDDNNInputOnlyLogLikelihood, psdd, nn, args.psdd_samples, randState)
 
         # Monte carlo over parameter uncertainty
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
@@ -507,16 +550,16 @@ if __name__ == '__main__':
                 run_experiment("Expectation + MC {}".format(args.samples), percent, method, psdd, lgc, params, True)
                 # TODO: consider conditional variant here
                 # Standard baseline with mean imputation
-                run_experiment("Imputation + MC {}".format(args.samples), percent,
+                run_experiment("RC Imputation + MC {}".format(args.samples), percent,
                                monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
             if args.input_samples > 1:
-                run_experiment("Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
+                run_experiment("RC Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
                                trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                                conditionalGaussian, randState, enforceBoolean
                 )
-                run_experiment("Marginalize MC {} + MC {}".format(args.input_samples, args.samples), percent,
+                run_experiment("RC Marginalize MC {} + MC {}".format(args.input_samples, args.samples), percent,
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
                                trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                                marginalizeGaussian, randState, enforceBoolean
