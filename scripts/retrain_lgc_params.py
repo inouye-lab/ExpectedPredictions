@@ -97,7 +97,6 @@ if __name__ == '__main__':
     # to file
     log_dir = os.path.join(args.output, 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    date_string = datetime.now().strftime("%Y%m%d-%H%M%S")
     file_handler = logging.FileHandler("{0}/retrain.log".format(circuitRoot))
     file_handler.setFormatter(log_formatter)
     root_logger.addHandler(file_handler)
