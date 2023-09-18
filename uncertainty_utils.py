@@ -72,7 +72,10 @@ def parallelOverSamples(dataset: DataSet, jobs: int, function, *args) -> List[Te
     return resultTensors
 
 
-def marginalizeGaussian(inputs: np.ndarray, mean: np.ndarray, covariance: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+# noinspection PyUnusedLocal
+# Extra parameter used for parity with conditional gaussian
+def marginalizeGaussian(inputs: np.ndarray, mean: np.ndarray, covariance: np.ndarray, covarianceInv: np.ndarray = None
+                        ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Produces a marginal gaussian distribution over all the missing variables in the input vector
     """
@@ -80,7 +83,8 @@ def marginalizeGaussian(inputs: np.ndarray, mean: np.ndarray, covariance: np.nda
     return mean[missingIndexes], covariance[np.ix_(missingIndexes, missingIndexes)]
 
 
-def conditionalGaussian(inputs: np.array, mean: np.ndarray, covariance: np.ndarray, returnCovariance: bool = True
+def conditionalGaussian(inputs: np.array, mean: np.ndarray, covariance: np.ndarray, covarianceInv: np.ndarray = None,
+                        returnCovariance: bool = True
                         ) -> Union[Optional[np.ndarray], Tuple[Optional[np.ndarray], Optional[np.ndarray]]]:
     """
     Produces a conditional gaussian distribution over all the missing variables in the input vector given observed
@@ -112,8 +116,16 @@ def conditionalGaussian(inputs: np.array, mean: np.ndarray, covariance: np.ndarr
         return condMean
 
     # Final computed conditional variance
-    condVar = covariance[np.ix_(missingIndexes, missingIndexes)] \
-        - np.matmul(np.matmul(corrMatrix, obsCovInv), corrMatrix.T)
+    # The following formula is more efficient (no need to compute an additional inverse)
+    # but leads to a crash on some datasets as it produces a matrix that is not positive semi-definiate
+    # condVar = covariance[np.ix_(missingIndexes, missingIndexes)] \
+    #     - np.matmul(np.matmul(corrMatrix, obsCovInv), corrMatrix.T)
+
+    # this formula is mathematically equivalent, but is less efficient
+    # however, we should be guaranteed a valid covariance matrix at the end
+    if covarianceInv is None:
+        covarianceInv = np.linalg.pinv(covariance)
+    condVar = np.linalg.pinv(covarianceInv[np.ix_(missingIndexes, missingIndexes)])
     return condMean, condVar
 
 

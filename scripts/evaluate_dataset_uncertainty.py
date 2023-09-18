@@ -157,9 +157,6 @@ if __name__ == '__main__':
 
     parser.add_argument("--benchmark_time",  action='store_true',
                         help="If set, disables batching on several methods to make the times more comparable")
-    parser.add_argument("--include_conditional",  action='store_true',
-                        help="If set, includes the conditional gaussian method when relevant. Can potentially lead to "
-                             "a crash with the inverse not converging that is still being debugged.")
 
     # Experiment configuration
     parser.add_argument("--missing", type=float, nargs='*', help="Percent of data to treat as missing")
@@ -436,8 +433,10 @@ if __name__ == '__main__':
                 trainingSampleCov = np.cov(trainingImages, rowvar=False)
             else:
                 trainingSampleCov = np.cov(trainingData.images, rowvar=False)
+            # needed for conditional covariance matrixes, might as well compute just once
+            trainingSampleCovInv = np.linalg.pinv(trainingSampleCov)
 
-        # second loop is over missing value counts
+        # delta method using gradients for parameter uncertainty and moment for input uncertainty
         if not args.skip_delta:
             method = deltaGaussianLogLikelihoodBenchmarkTime if args.benchmark_time else deltaGaussianLogLikelihood
             run_experiment("Moment + Delta", percent, method, psdd, lgc, zero_grad=True)
@@ -460,40 +459,43 @@ if __name__ == '__main__':
                 return conditionalMeanImputation(inputs, trainingSampleMean, trainingSampleCov,
                                                  enforceBoolean=enforceBoolean)
 
+            # Basic imputation: runs the regressor handling missing values via imputation
+            # Expectation is Expected Predictions first moment
             if args.include_trivial:
                 run_experiment("Mean Imputation", percent, basicImputation, basicMeanImputation, lgc)
-                if args.include_conditional:
-                    run_experiment("Conditional Imputation", percent, basicImputation, basicConditionalImputation, lgc)
+                run_experiment("Conditional Imputation", percent, basicImputation, basicConditionalImputation, lgc)
                 run_experiment("Expectation", percent, basicExpectation, psdd, lgc)
             if args.include_residual_input:
                 run_experiment("Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicMeanImputation, lgc)
-                if args.include_conditional:
-                    run_experiment("Conditional + Residual", percent,
-                                   residualPerSampleInput, pureValidSet,
-                                   basicImputation, basicConditionalImputation, lgc)
+                run_experiment("Conditional + Residual", percent,
+                               residualPerSampleInput, pureValidSet,
+                               basicImputation, basicConditionalImputation, lgc)
                 run_experiment("Expectation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicExpectation, psdd, lgc)
 
+        # Handles input uncertainty simply as the second moment
         if args.input_baseline:
             method = inputLogLikelihoodBenchmarkTime if args.benchmark_time else inputLogLikelihood
             run_experiment("Moment only", percent, method, psdd, lgc)
+
+        # Handle input uncertainty as samples from a monte carlo gaussian
         if args.input_samples > 1:
-            if args.include_conditional:
-                run_experiment("Conditional MC {} only".format(args.input_samples), percent,
-                               monteCarloGaussianInputOnlyLogLikelihood, lgc,
-                               trainingSampleMean, trainingSampleCov, args.input_samples,
-                               conditionalGaussian, randState, enforceBoolean)
+            run_experiment("Conditional MC {} only".format(args.input_samples), percent,
+                           monteCarloGaussianInputOnlyLogLikelihood, lgc,
+                           trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
+                           conditionalGaussian, randState, enforceBoolean)
             run_experiment("Marginalize MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
-                           trainingSampleMean, trainingSampleCov, args.input_samples,
+                           trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                            marginalizeGaussian, randState, enforceBoolean)
         if args.psdd_samples > 1:
             run_experiment("PSDD MC {} only".format(args.psdd_samples), percent,
                            monteCarloPSDDInputOnlyLogLikelihood, psdd, lgc, args.psdd_samples, randState)
 
+        # Monte carlo over parameter uncertainty
         # Fast monte carlo, lets me get the accuracy far closer to Delta with less of a runtime hit
         if args.samples > 1:
             params = sampleMonteCarloParameters(lgc, args.samples, randState)
@@ -503,20 +505,20 @@ if __name__ == '__main__':
             if args.parameter_baseline:
                 # Alternative parameter baseline, just ignores input uncertainty without mean imputation
                 run_experiment("Expectation + MC {}".format(args.samples), percent, method, psdd, lgc, params, True)
+                # TODO: consider conditional variant here
                 # Standard baseline with mean imputation
                 run_experiment("Imputation + MC {}".format(args.samples), percent,
                                monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
             if args.input_samples > 1:
-                if args.include_conditional:
-                    run_experiment("Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
-                                   monteCarloGaussianParamInputLogLikelihood, lgc, params,
-                                   trainingSampleMean, trainingSampleCov, args.input_samples,
-                                   conditionalGaussian, randState, enforceBoolean
-                    )
+                run_experiment("Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
+                               monteCarloGaussianParamInputLogLikelihood, lgc, params,
+                               trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
+                               conditionalGaussian, randState, enforceBoolean
+                )
                 run_experiment("Marginalize MC {} + MC {}".format(args.input_samples, args.samples), percent,
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
-                               trainingSampleMean, trainingSampleCov, args.input_samples,
+                               trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                                marginalizeGaussian, randState, enforceBoolean
                 )
             if args.psdd_samples > 1:
