@@ -122,6 +122,7 @@ if __name__ == '__main__':
     parser.add_argument('--prefix', type=str, default='', help='Folder prefix for both the model and the output')
     parser.add_argument("--classes", type=int, required=True, help="Number of classes in the dataset")
     parser.add_argument("--data", type=str, required=True, help="Path to the dataset")
+    parser.add_argument("--fmap", type=str, default='', help="Path to the dataset fmap")
     parser.add_argument("--retrain_dir", type=str, required=True, help="Location of folders for retrained models")
 
     # Output configuration
@@ -256,29 +257,42 @@ if __name__ == '__main__':
     # populate missing datasets
     logging.info("Preparing missing datasets")
     randState = RandomState(args.seed)
+
+    # if given a fmap, handle missing percentages as features in the map
+    if args.fmap != '':
+        with open(args.fmap, "rb") as f:
+            fmap = np.array(pickle.load(f))
+        uniqueIndexes = np.unique(fmap)
+        uniqueVariables = len(uniqueIndexes)
+
+        def sampleMissing(percent: float) -> np.ndarray:
+            return np.isin(
+                fmap, randState.choice(uniqueIndexes, size=math.floor(uniqueVariables * percent), replace=False)
+            )
+    else:
+        # without the fmap, treat each variable as unique values, could lead to a higher covariance than expected
+        def sampleMissing(percent: float) -> np.ndarray:
+            return randState.choice(variables, size=math.floor(variables * percent), replace=False)
+
     testSets: List[Tuple[float, DataSet, Optional[DataSet]]] = []
     for missing in args.missing:
         missingTestImages = np.copy(testImages)
         # -1 is an internal value representing missing
         if args.global_missing_features:
-            sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
-            missingTestImages[:, sampleIndexes] = -1
+            missingTestImages[:, sampleMissing(missing)] = -1
         else:
             for i in range(testSamples):
-                sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
-                missingTestImages[i, sampleIndexes] = -1
+                missingTestImages[i, sampleMissing(missing)] = -1
 
         # only generate valid datasets if needed
         missingValidImages = None
         if args.residual_missingness:
             missingValidImages = np.copy(validImages)
             if args.global_missing_features:
-                sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
-                missingValidImages[:, sampleIndexes] = -1
+                missingValidImages[:, sampleMissing(missing)] = -1
             else:
                 for i in range(validSamples):
-                    sampleIndexes = randState.choice(variables, size=math.floor(variables * missing), replace=False)
-                    missingValidImages[i, sampleIndexes] = -1
+                    missingValidImages[i, sampleMissing(missing)] = -1
             missingValidImages = DataSet(missingValidImages, validLabels, one_hot = False)
 
         testSets.append((missing, DataSet(missingTestImages, testLabels, one_hot = False), missingValidImages))
