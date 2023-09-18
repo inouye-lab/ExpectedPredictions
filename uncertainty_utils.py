@@ -8,13 +8,14 @@ from typing import Optional, Any, List, Tuple, Union
 
 import torch
 from joblib import delayed, Parallel
+from numpy.random import RandomState
 from sklearn.utils.fixes import _joblib_parallel_args
 from torch import Tensor
 from torch.distributions import Normal
 
 from LogisticCircuit.algo.BaseCircuit import BaseCircuit
 from LogisticCircuit.util.DataSet import DataSet
-from pypsdd import PSddNode
+from pypsdd import PSddNode, InstMap
 
 
 def orElse(value: Optional[Any], fallback: Any):
@@ -138,3 +139,77 @@ def conditionalMeanImputation(inputs: np.ndarray, mean: np.ndarray, covariance: 
                 0, 1
             )
     return inputs
+
+
+def augmentMonteCarloSamplesGaussian(inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
+                                     inputCovarianceInv: np.ndarray, inputReducer: callable, obsX: np.ndarray = None,
+                                     seed: int = 1337, randState: RandomState = None) -> np.ndarray:
+    """
+    Augments the observed X values with monte carlo samples from a gaussian input distribution
+    """
+    # the goal here is to process all test samples and all input samples in one large batch of size test * input
+    # start by constructing a 3D matrix of test sample * input sample * feature
+    testSamples = obsX.shape[0]
+    features = obsX.shape[1]
+    obsXAugmented = np.zeros((testSamples, inputSamples, features))
+
+    # random state can be passed in or a seed is passed for threads
+    if randState is None:
+        randState = RandomState(seed)
+
+    # form matrix from samples
+    for sample in range(testSamples):
+        image = obsX[sample, :]
+        missingIndexes = image == -1
+
+        obsXAugmented[sample, :, :] = np.repeat(image.reshape(1, 1, -1), repeats=inputSamples, axis=1)
+        # If no missing indexes, no need to handle samples
+        if missingIndexes.sum() != 0:
+            # Need to sample the the distribution the requested number of times, then replace all -1 values
+            missingMean, missingCov = inputReducer(image, inputMean, inputCovariance, inputCovarianceInv)
+            missingSamples = randState.multivariate_normal(missingMean, missingCov, size=inputSamples)
+            # TODO: the following clamp is wrong and I should feel ashamed for writing it, but right now I need to test other stuff
+            obsXAugmented[sample, :, missingIndexes] = np.clip(missingSamples.T, 0, 1)
+
+        # we should have filled in all -1 values in the final array
+        assert (obsXAugmented[sample, :, :] == -1).sum() == 0
+
+    return obsXAugmented
+
+
+def augmentMonteCarloSamplesPSDD(psdd: PSddNode, inputSamples: int, obsX: np.ndarray = None,
+                                 seed: int = 1337, randState: RandomState = None) -> np.ndarray:
+    """
+    Augments the observed X values with monte carlo samples from a PSDD
+    """
+    testSamples = obsX.shape[0]
+    features = obsX.shape[1]
+    obsXAugmented = np.zeros((testSamples, inputSamples, features))
+
+    # random state can be passed in or a seed is passed for threads
+    if randState is None:
+        randState = RandomState(seed)
+
+    for sample in range(testSamples):
+        image = obsX[sample, :]
+        missingIndexes = image == -1
+
+        obsXAugmented[sample, :, :] = np.repeat(image.reshape(1, 1, -1), repeats=inputSamples, axis=1)
+        # If no missing indexes, no need to handle samples
+        if missingIndexes.sum() != 0:
+            # Need to sample the the distribution the requested number of times, then replace all -1 values
+            instMap = InstMap.from_list(image)
+            psdd.value(instMap, clear_data = False)
+            for inputSample in range(inputSamples):
+                psddSample = psdd.simulate_with_evidence(instMap.copy(), seed=randState.randint(0, 2**32 - 1))
+                for i, isMissing in enumerate(missingIndexes):
+                    if isMissing:
+                        obsXAugmented[sample, inputSample, i] = psddSample[i + 1]
+                    else:
+                        assert obsXAugmented[sample, inputSample, i] == psddSample[i + 1]
+            psdd.clear_bits()
+
+        # we should have filled in all -1 values in the final array
+        assert (obsXAugmented[sample, :, :] == -1).sum() == 0
+
+    return obsXAugmented

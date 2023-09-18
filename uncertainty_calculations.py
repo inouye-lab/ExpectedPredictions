@@ -15,7 +15,7 @@ from pypsdd import PSddNode, InstMap
 from sklearn.linear_model._logistic import (_joblib_parallel_args)
 from joblib import Parallel, delayed
 
-from uncertainty_utils import conditionalGaussian
+from uncertainty_utils import conditionalGaussian, augmentMonteCarloSamplesGaussian, augmentMonteCarloSamplesPSDD
 
 MonteCarloParams = List[torch.Tensor]
 """List of params for monte carlo, taking advantage of the fact we can reuse a cache for a given input vector"""
@@ -274,28 +274,14 @@ def _monteCarloGaussianInputIteration(lgc: BaseCircuit, param: Optional[torch.Te
 
     # the goal here is to process all test samples and all input samples in one large batch of size test * input
     # start by constructing a 3D matrix of test sample * input sample * feature
+    obsXAugmented = augmentMonteCarloSamplesGaussian(
+        inputMean, inputCovariance, inputSamples, inputReducer, obsX, seed, randState
+    )
+
+    # TODO: if the above is a callable, the below is redundant to the PSDD version
+    # now we have a feature * test sample * input sample array, but to evaluate the circuit we need feature * sample
     testSamples = obsX.shape[0]
     features = obsX.shape[1]
-    obsXAugmented = np.zeros((testSamples, inputSamples, features))
-    if randState is None:
-        randState = RandomState(seed)
-    for sample in range(testSamples):
-        image = obsX[sample, :]
-        missingIndexes = image == -1
-
-        obsXAugmented[sample, :, :] = np.repeat(image.reshape(1, 1, -1), repeats=inputSamples, axis=1)
-        # If no missing indexes, no need to handle samples
-        if missingIndexes.sum() != 0:
-            # Need to sample the the distribution the requested number of times, then replace all -1 values
-            missingMean, missingCov = inputReducer(image, inputMean, inputCovariance)
-            missingSamples = randState.multivariate_normal(missingMean, missingCov, size=inputSamples)
-            # TODO: the following clamp is wrong and I should feel ashamed for writing it, but right now I need to test other stuff
-            obsXAugmented[sample, :, missingIndexes] = np.clip(missingSamples.T, 0, 1)
-
-        # we should have filled in all -1 values in the final array
-        assert (obsXAugmented[sample, :, :] == -1).sum() == 0
-
-    # now we have a feature * test sample * input sample array, but to evaluate the circuit we need feature * sample
     obsXInput = obsXAugmented.reshape(testSamples * inputSamples, features)
     # for i in range(inputSamples):
     #     if (obsXAugmented[0, i, :] != obsXInput[i]).sum() != 0:
@@ -397,34 +383,11 @@ def _monteCarloPSDDInputIteration(psdd: PSddNode, lgc: BaseCircuit, param: Optio
 
     # the goal here is to process all test samples and all input samples in one large batch of size test * input
     # start by constructing a 3D matrix of test sample * input sample * feature
-    testSamples = obsX.shape[0]
-    features = obsX.shape[1]
-    obsXAugmented = np.zeros((testSamples, inputSamples, features))
-    if randState is None:
-        randState = RandomState(seed)
-    for sample in range(testSamples):
-        image = obsX[sample, :]
-        missingIndexes = image == -1
-
-        obsXAugmented[sample, :, :] = np.repeat(image.reshape(1, 1, -1), repeats=inputSamples, axis=1)
-        # If no missing indexes, no need to handle samples
-        if missingIndexes.sum() != 0:
-            # Need to sample the the distribution the requested number of times, then replace all -1 values
-            instMap = InstMap.from_list(image)
-            psdd.value(instMap, clear_data = False)
-            for inputSample in range(inputSamples):
-                psddSample = psdd.simulate_with_evidence(instMap.copy())
-                for i, isMissing in enumerate(missingIndexes):
-                    if isMissing:
-                        obsXAugmented[sample, inputSample, i] = psddSample[i + 1]
-                    else:
-                        assert obsXAugmented[sample, inputSample, i] == psddSample[i + 1]
-            psdd.clear_bits()
-
-        # we should have filled in all -1 values in the final array
-        assert (obsXAugmented[sample, :, :] == -1).sum() == 0
+    obsXAugmented = augmentMonteCarloSamplesPSDD(psdd, inputSamples, obsX, seed, randState)
 
     # now we have a feature * test sample * input sample array, but to evaluate the circuit we need feature * sample
+    testSamples = obsX.shape[0]
+    features = obsX.shape[1]
     obsXInput = obsXAugmented.reshape(testSamples * inputSamples, features)
     # for i in range(inputSamples):
     #     if (obsXAugmented[0, i, :] != obsXInput[i]).sum() != 0:
@@ -454,11 +417,6 @@ def monteCarloPSDDInputOnly(psdd: PSddNode, lgc: BaseCircuit, inputSamples: int,
     @param obsX:             Observation vector
     @return  Tuple of mean, and input variance
     """
-    # to ensure consistency despite the fact we are generating random numbers on threads
-    # we generate a random seed for each thread to use for its random number generation
-    if randState is None:
-        randState = RandomState(1337)
-
     means, covariances = _monteCarloPSDDInputIteration(psdd, lgc, None, inputSamples, obsX, randState=randState)
 
     # mean, parameter variance (averaged across input), input variance (averaged across parameters)
