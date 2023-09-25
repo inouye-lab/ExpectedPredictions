@@ -478,15 +478,26 @@ if __name__ == '__main__':
             def basicPsddMpeImputation(inputs: np.ndarray):
                 return psddMpeImputation(inputs, psdd)
 
+            # # median is not used outside imputation
+            # if args.full_training_gaussian:
+            #     trainingSampleMedian = np.median(trainingImages, axis=0)
+            # else:
+            #     trainingSampleMedian = np.median(trainingData.images, axis=0)
+            #
+            # def basicMedianImputation(inputs: np.ndarray):
+            #     return meanImputation(inputs, trainingSampleMedian, enforceBoolean=enforceBoolean)
+
             # Basic imputation: runs the regressor handling missing values via imputation
             # Expectation is Expected Predictions first moment
             if args.include_trivial:
                 run_experiment("RC Mean Imputation", percent, basicImputation, basicMeanImputation, lgc)
+                # run_experiment("RC Median Imputation", percent, basicImputation, basicMedianImputation, lgc)
                 run_experiment("RC Gaussian Imputation", percent, basicImputation, basicConditionalImputation, lgc)
                 run_experiment("RC PSDD Imputation", percent, basicImputation, basicPsddMpeImputation, lgc)
                 run_experiment("Expectation", percent, basicExpectation, psdd, lgc)
                 if nn is not None:
                     run_experiment("NN Mean Imputation", percent, basicNNImputation, basicMeanImputation, nn)
+                    # run_experiment("NN Median Imputation", percent, basicNNImputation, basicMedianImputation, nn)
                     run_experiment("NN Gaussian Imputation", percent, basicNNImputation,
                                    basicConditionalImputation, nn)
                     run_experiment("NN PSDD Imputation", percent, basicNNImputation, basicPsddMpeImputation, nn)
@@ -494,26 +505,32 @@ if __name__ == '__main__':
             # Residual input runs any of the above basic methods, making like samples with known labels to produce a
             # baseline uncertainty
             if args.include_residual_input:
-                run_experiment("RC Imputation + Residual", percent,
+                run_experiment("RC Mean Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicMeanImputation, lgc)
-                run_experiment("RC Gaussian + Residual", percent,
+                # run_experiment("RC Median Imputation + Residual", percent,
+                #                residualPerSampleInput, pureValidSet,
+                #                basicImputation, basicMedianImputation, lgc)
+                run_experiment("RC Gaussian Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicConditionalImputation, lgc)
-                run_experiment("RC PSDD + Residual", percent,
+                run_experiment("RC PSDD Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicPsddMpeImputation, lgc)
-                run_experiment("Expectation + Residual", percent,
+                run_experiment("Expectation Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicExpectation, psdd, lgc)
                 if nn is not None:
-                    run_experiment("NN Imputation + Residual", percent,
+                    run_experiment("NN Mean Imputation + Residual", percent,
                                    residualPerSampleInput, pureValidSet,
                                    basicNNImputation, basicMeanImputation, nn)
-                    run_experiment("NN Gaussian + Residual", percent,
+                    # run_experiment("NN Median Imputation + Residual", percent,
+                    #                residualPerSampleInput, pureValidSet,
+                    #                basicNNImputation, basicMedianImputation, nn)
+                    run_experiment("NN Gaussian Imputation + Residual", percent,
                                    residualPerSampleInput, pureValidSet,
                                    basicNNImputation, basicConditionalImputation, nn)
-                    run_experiment("NN PSDD + Residual", percent,
+                    run_experiment("NN PSDD Imputation + Residual", percent,
                                    residualPerSampleInput, pureValidSet,
                                    basicNNImputation, basicPsddMpeImputation, nn)
 
