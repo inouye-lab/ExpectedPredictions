@@ -32,7 +32,8 @@ from LogisticCircuit.algo.NeuralNetworkBaseline import NeuralNetworkRegressor
 from pypsdd.vtree import Vtree as PSDD_Vtree
 from pypsdd.manager import PSddManager
 
-from uncertainty_utils import meanImputation, conditionalMeanImputation, conditionalGaussian, marginalizeGaussian
+from uncertainty_utils import meanImputation, conditionalMeanImputation, conditionalGaussian, marginalizeGaussian, \
+    psddMpeImputation
 from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
@@ -474,16 +475,21 @@ if __name__ == '__main__':
                 return conditionalMeanImputation(inputs, trainingSampleMean, trainingSampleCov,
                                                  enforceBoolean=enforceBoolean)
 
+            def basicPsddMpeImputation(inputs: np.ndarray):
+                return psddMpeImputation(inputs, psdd)
+
             # Basic imputation: runs the regressor handling missing values via imputation
             # Expectation is Expected Predictions first moment
             if args.include_trivial:
                 run_experiment("RC Mean Imputation", percent, basicImputation, basicMeanImputation, lgc)
-                run_experiment("RC Conditional Imputation", percent, basicImputation, basicConditionalImputation, lgc)
+                run_experiment("RC Gaussian Imputation", percent, basicImputation, basicConditionalImputation, lgc)
+                run_experiment("RC PSDD Imputation", percent, basicImputation, basicPsddMpeImputation, lgc)
                 run_experiment("Expectation", percent, basicExpectation, psdd, lgc)
                 if nn is not None:
                     run_experiment("NN Mean Imputation", percent, basicNNImputation, basicMeanImputation, nn)
-                    run_experiment("NN Conditional Imputation", percent, basicNNImputation,
+                    run_experiment("NN Gaussian Imputation", percent, basicNNImputation,
                                    basicConditionalImputation, nn)
+                    run_experiment("NN PSDD Imputation", percent, basicNNImputation, basicPsddMpeImputation, nn)
 
             # Residual input runs any of the above basic methods, making like samples with known labels to produce a
             # baseline uncertainty
@@ -491,9 +497,12 @@ if __name__ == '__main__':
                 run_experiment("RC Imputation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicMeanImputation, lgc)
-                run_experiment("RC Conditional + Residual", percent,
+                run_experiment("RC Gaussian + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicImputation, basicConditionalImputation, lgc)
+                run_experiment("RC PSDD + Residual", percent,
+                               residualPerSampleInput, pureValidSet,
+                               basicImputation, basicPsddMpeImputation, lgc)
                 run_experiment("Expectation + Residual", percent,
                                residualPerSampleInput, pureValidSet,
                                basicExpectation, psdd, lgc)
@@ -501,9 +510,12 @@ if __name__ == '__main__':
                     run_experiment("NN Imputation + Residual", percent,
                                    residualPerSampleInput, pureValidSet,
                                    basicNNImputation, basicMeanImputation, nn)
-                    run_experiment("NN Conditional + Residual", percent,
+                    run_experiment("NN Gaussian + Residual", percent,
                                    residualPerSampleInput, pureValidSet,
                                    basicNNImputation, basicConditionalImputation, nn)
+                    run_experiment("NN PSDD + Residual", percent,
+                                   residualPerSampleInput, pureValidSet,
+                                   basicNNImputation, basicPsddMpeImputation, nn)
 
         # Handles input uncertainty simply as the second moment
         if args.input_baseline:
@@ -512,7 +524,7 @@ if __name__ == '__main__':
 
         # Handle input uncertainty as samples from a monte carlo gaussian
         if args.input_samples > 1:
-            run_experiment("RC Conditional MC {} only".format(args.input_samples), percent,
+            run_experiment("RC Gaussian MC {} only".format(args.input_samples), percent,
                            monteCarloGaussianInputOnlyLogLikelihood, lgc,
                            trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                            conditionalGaussian, randState, enforceBoolean)
@@ -521,7 +533,7 @@ if __name__ == '__main__':
                            trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                            marginalizeGaussian, randState, enforceBoolean)
             if nn is not None:
-                run_experiment("NN Conditional MC {} only".format(args.input_samples), percent,
+                run_experiment("NN Gaussian MC {} only".format(args.input_samples), percent,
                                monteCarloGaussianNNInputOnlyLogLikelihood, nn,
                                trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                                conditionalGaussian, randState, enforceBoolean)
@@ -554,7 +566,7 @@ if __name__ == '__main__':
                                monteCarloParamLogLikelihood, trainingSampleMean, lgc, params)
 
             if args.input_samples > 1:
-                run_experiment("RC Conditional MC {} + MC {}".format(args.input_samples, args.samples), percent,
+                run_experiment("RC Gaussian MC {} + MC {}".format(args.input_samples, args.samples), percent,
                                monteCarloGaussianParamInputLogLikelihood, lgc, params,
                                trainingSampleMean, trainingSampleCov, args.input_samples, trainingSampleCovInv,
                                conditionalGaussian, randState, enforceBoolean

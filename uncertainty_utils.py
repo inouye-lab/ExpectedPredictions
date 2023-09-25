@@ -156,6 +156,24 @@ def conditionalMeanImputation(inputs: np.ndarray, mean: np.ndarray, covariance: 
     return inputs
 
 
+def psddMpeImputation(inputs: np.ndarray, psdd: PSddNode) -> np.ndarray:
+    """Replaces all -1 in the dataset with the MPE value from the PSDD"""
+    inputs = inputs.copy()
+
+    for sample in range(inputs.shape[0]):
+        image = inputs[sample, :]
+        missingIndexes = image == -1
+        if missingIndexes.sum() != 0:
+            instMap = InstMap.from_list(image)
+            _, psddMpe = psdd.mpe(instMap)
+            for i, isMissing in enumerate(missingIndexes):
+                if isMissing:
+                    inputs[sample, i] = psddMpe[i + 1]
+                else:
+                    assert inputs[sample, i] == psddMpe[i + 1]
+    return inputs
+
+
 def augmentMonteCarloSamplesGaussian(inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
                                      inputCovarianceInv: np.ndarray, inputReducer: callable, obsX: np.ndarray = None,
                                      seed: int = 1337, randState: RandomState = None,
