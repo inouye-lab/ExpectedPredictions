@@ -33,7 +33,7 @@ from pypsdd.vtree import Vtree as PSDD_Vtree
 from pypsdd.manager import PSddManager
 
 from uncertainty_utils import meanImputation, conditionalMeanImputation, conditionalGaussian, marginalizeGaussian, \
-    psddMpeImputation
+    psddMpeImputation, miceImputation
 from uncertainty_calculations import sampleMonteCarloParameters
 from uncertainty_validation import deltaGaussianLogLikelihood, monteCarloGaussianLogLikelihood, \
     fastMonteCarloGaussianLogLikelihood, exactDeltaGaussianLogLikelihood, monteCarloParamLogLikelihood, \
@@ -159,6 +159,13 @@ if __name__ == '__main__':
                         help="Number of monte carlo samples on the psdd distribution for missing values")
     parser.add_argument("--skip_mc",  action='store_true',
                         help="If set, skips the main monte carlo method even when parameter samples is set")
+
+    parser.add_argument("--mice_iterations", type=int, nargs='*', default=[],
+                        help="Number of iterations to run MICE. If unset, skips MICE. Accepts multiple values")
+    parser.add_argument("--include_residual_mice",  action='store_true',
+                        help="If set, runs the residual input method for MICE, requires mice_iterations to be set")
+    parser.add_argument("--include_augmented_mice",  action='store_true',
+                        help="If set, includes variants of MICE that augment with the training data")
 
     parser.add_argument("--benchmark_time",  action='store_true',
                         help="If set, disables batching on several methods to make the times more comparable")
@@ -533,6 +540,49 @@ if __name__ == '__main__':
                     run_experiment("NN PSDD Imputation + Residual", percent,
                                    residualPerSampleInput, pureValidSet,
                                    basicNNImputation, basicPsddMpeImputation, nn)
+
+        # MICE baseline
+        for iterations in args.mice_iterations:
+            def basicMiceImputation(inputs: np.ndarray):
+                return miceImputation(inputs, iterations=iterations)
+
+            # intuitively, I feel like predicting missing values purely based on testing dataset data feels wrong
+            # however, MICE gets better results like that, suggesting a possible difference in domain
+            if args.include_augmented_mice:
+                # respect the full training gaussian on mice, its the same idea
+                if args.full_training_gaussian:
+                    def augmentedMiceImputation(inputs: np.ndarray):
+                        return miceImputation(inputs, iterations=iterations, additionalData=trainingImages)
+                else:
+                    def augmentedMiceImputation(inputs: np.ndarray):
+                        return miceImputation(inputs, iterations=iterations, additionalData=trainingData.images)
+
+            run_experiment("RC MICE {} Imputation".format(iterations), percent, basicImputation, basicMiceImputation, lgc)
+            if args.include_augmented_mice:
+                run_experiment("RC Augmented MICE {}".format(iterations), percent, basicImputation, augmentedMiceImputation, lgc)
+            if nn is not None:
+                run_experiment("NN MICE {} Imputation".format(iterations), percent, basicNNImputation, basicMiceImputation, nn)
+                if args.include_augmented_mice:
+                    run_experiment("NN Augmented MICE {}".format(iterations), percent, basicNNImputation, augmentedMiceImputation, nn)
+
+            if args.include_residual_mice:
+                # TODO: MICE does not work if you have no values in a column,
+                #  and residual relies on making specific columns missing
+                # run_experiment("RC MICE {} Imputation + Residual".format(iterations), percent,
+                #                residualPerSampleInput, pureValidSet,
+                #                basicImputation, basicMiceImputation, lgc)
+                if args.include_augmented_mice:
+                    run_experiment("RC Augmented MICE {} + Residual".format(iterations), percent,
+                                   residualPerSampleInput, pureValidSet,
+                                   basicImputation, augmentedMiceImputation, lgc)
+                if nn is not None:
+                    # run_experiment("NN MICE {} Imputation + Residual".format(iterations), percent,
+                    #                residualPerSampleInput, pureValidSet,
+                    #                basicNNImputation, basicMiceImputation, nn)
+                    if args.include_augmented_mice:
+                        run_experiment("NN Augmented MICE {} + Residual".format(iterations), percent,
+                                       residualPerSampleInput, pureValidSet,
+                                       basicNNImputation, augmentedMiceImputation, nn)
 
         # Handles input uncertainty simply as the second moment
         if args.input_baseline:

@@ -6,10 +6,12 @@ import gc
 import numpy as np
 from typing import Optional, Any, List, Tuple, Union
 
+import pandas
 import torch
 from joblib import delayed, Parallel
 from numpy.random import RandomState
 from sklearn.utils.fixes import _joblib_parallel_args
+from statsmodels.imputation import mice
 from torch import Tensor
 from torch.distributions import Normal
 
@@ -172,6 +174,40 @@ def psddMpeImputation(inputs: np.ndarray, psdd: PSddNode) -> np.ndarray:
                 else:
                     assert inputs[sample, i] == psddMpe[i + 1]
     return inputs
+
+
+def miceImputation(inputs: np.ndarray, additionalData: np.ndarray = None,
+                   iterations: int = 1, enforceBoolean: bool = True) -> np.ndarray:
+    """Replaces all -1 in the dataset with the MICE value"""
+
+    # mice wants NAN for inputs
+    inputs = inputs.copy()
+    inputs[inputs == -1] = np.nan
+    inputShape = inputs.shape
+
+    # this might be wrong, but intuitively I feel MICE has a better chance if you give it info that has non-missing data
+    # this is required to perform the residual method notably
+    if additionalData is not None:
+        inputs = np.concatenate((additionalData, inputs), axis=0)
+
+    # just run MICE from the library, requires creating a data frame with each feature as a column
+    mouse = mice.MICEData(pandas.DataFrame(inputs, columns=[
+        "feature_" + str(i) for i in range(inputs.shape[1])
+    ]))
+    mouse.update_all(iterations)
+    result = mouse.next_sample().values
+
+    # if we augmented with additional data, remove it from the mice results
+    if additionalData is not None:
+        result = result[additionalData.shape[0]:, :]
+    assert result.shape == inputShape, "Expected result shape " + str(result.shape) \
+                                       + " to be the same as input shape " + str(inputShape)
+
+    # MICE may give values outside the 0 to 1 range, ideally we should convert to booleans, but just clip if requested
+    if enforceBoolean:
+        return (result > 0.5).astype(np.float32)
+    else:
+        return np.clip(result, 0, 1).astype(np.float32)
 
 
 def augmentMonteCarloSamplesGaussian(inputMean: np.ndarray, inputCovariance: np.ndarray, inputSamples: int,
